@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# A script for running all our linters and stuff.
+set -o errexit
+
+echo "Running ruff linting."
+poetry run ruff check
+echo "Running ruff format."
+poetry run ruff format
+echo "Running mypy."
+poetry run mypy meadow tests

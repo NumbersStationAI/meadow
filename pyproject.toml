@@ -1,0 +1,76 @@
+[tool.poetry]
+name = "meadow"
+homepage = "https://github.com/NumbersStationAI/meadow"
+version = "0.1.0"
+description = "Agents to automate away BI"
+authors = ["Laurel Orr <laurel.orr@numbersstation.ai>"]
+repository = "https://github.com/NumbersStationAI/meadow"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+openai = "^1.23.2"
+nest-asyncio = "^1.6.0"
+duckdb = "^0.10.2"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.4.1"
+mypy = "^1.9.0"
+pytest = "^8.1.1"
+pre-commit = "^3.7.0"
+ipykernel = "^6.29.4"
+pytest-cov = "^5.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.mypy]
+disallow_untyped_defs = true
+exclude = []
+local_partial_types = true
+strict_optional = false
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = []
+
+[tool.ruff.lint]
+select = [
+  # flake8-logging
+  "G",
+  # isort
+  "I",
+  # autoflake
+  "F",
+  # flake8
+  "E",
+  "W",
+  "N",
+]
+ignore = [
+  # E203: whitespace before ':'
+  "E203",
+  # E501: allow long lines, enforce line length with ruff
+  "E501",
+  # E731: do not assign a lambda expression, use a def
+  "E731",
+  # N812: lowercase imported as non-lowercase
+  "N812",
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["meadow", "tests"]
+
+[tool.ruff.lint.pep8-naming]
+classmethod-decorators = ["declared_attr"]
+
+[tool.pytest.ini_options]
+addopts = "-vv -rsXx"
+log_date_format = "%Y-%m-%d %H:%M:%S"
+log_format = "[%(levelname)s] %(message)s"
+# The following options are useful for local debugging
+# addopts = "-v -rsXx -s -x --pdb"
+# log_cli_level = "DEBUG"
+# log_cli = true
