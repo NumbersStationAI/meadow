@@ -1,6 +1,7 @@
 """Language model request object."""
 
 from typing import Any
+
 from pydantic import BaseModel, model_serializer
 
 from meadow.agent.schema import ChatMessage
