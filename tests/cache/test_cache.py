@@ -3,7 +3,7 @@ import uuid
 import pytest
 
 from meadow.cache.cache import Cache
-from meadow.client.schema import ChatMessage, Choice, Request, Response, Usage
+from meadow.client.schema import ChatMessage, ChatRequest, ChatResponse, Choice, Usage
 
 
 def test_set_and_get_none(duckdb_cache: tuple[Cache, str]) -> None:
@@ -20,8 +20,8 @@ def test_set_and_get_none(duckdb_cache: tuple[Cache, str]) -> None:
 def test_set_and_get(duckdb_cache: tuple[Cache, str]) -> None:
     """Test overwriting an existing key's value."""
     cache, _ = duckdb_cache
-    request = Request(
-        prompt=[
+    request = ChatRequest(
+        messages=[
             {
                 "role": "system",
                 "content": "Be a bunny",
@@ -31,9 +31,9 @@ def test_set_and_get(duckdb_cache: tuple[Cache, str]) -> None:
                 "content": "What's the weather?",
             },
         ],
-        engine="gpt-3.5-turbo",
+        model="gpt-3.5-turbo",
     )
-    response = Response(
+    response = ChatResponse(
         id=str(uuid.uuid4()),
         cached=False,
         choices=[
@@ -42,7 +42,7 @@ def test_set_and_get(duckdb_cache: tuple[Cache, str]) -> None:
             )
         ],
         created=1631987231,
-        engine="gpt-3.5-turbo",
+        model="gpt-3.5-turbo",
         usage=Usage(
             completion_tokens=100,
             prompt_tokens=10,

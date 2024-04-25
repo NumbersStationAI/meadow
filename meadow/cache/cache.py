@@ -3,15 +3,15 @@
 import json
 from abc import ABC, abstractmethod
 
-from meadow.client.schema import Request, Response
+from meadow.client.schema import ChatRequest, ChatResponse
 
 
-def serialize_request(request: Request) -> str:
+def serialize_request(request: ChatRequest) -> str:
     """Serialize a request."""
     return json.dumps(request.model_dump(exclude_none=True))
 
 
-def serialize_response(response: Response) -> str:
+def serialize_response(response: ChatResponse) -> str:
     """Serialize a response."""
     return json.dumps(response.model_dump())
 
@@ -66,7 +66,7 @@ class Cache(ABC):
         """Commit any results."""
         raise NotImplementedError()  # pragma: no cover
 
-    def get(self, request: Request) -> Response | None:
+    def get(self, request: ChatRequest) -> ChatResponse | None:
         """Get the result of request.
 
         Args:
@@ -80,12 +80,12 @@ class Cache(ABC):
         key = serialize_request(request)
         cached_response = self.get_key(key)
         if cached_response:
-            response = Response.model_validate(json.loads(cached_response))
+            response = ChatResponse.model_validate(json.loads(cached_response))
             response.cached = True
             return response
         return None
 
-    def set(self, request: Request, response: Response) -> None:
+    def set(self, request: ChatRequest, response: ChatResponse) -> None:
         """Set the value for the key.
 
         Args:
