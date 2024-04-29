@@ -26,7 +26,7 @@ class Client:
 
     async def chat(
         self,
-        prompt: list[dict[str, str]],
+        messages: list[dict[str, str]],
         model: str = None,
         n: int = 1,
         seed: int = None,
@@ -49,14 +49,14 @@ class Client:
         If cache is not None and overwrite_cache is False, the cache will be
         checked first and returned if available.
         """
-        if not prompt:
-            raise ValueError("Prompt is required.")
+        if not messages:
+            raise ValueError("Messages are required.")
         if not model and not self.model:
             raise ValueError("Model is required.")
         model = model or self.model
         # build the ChatRequest
         request = ChatRequest(
-            messages=prompt,
+            messages=messages,
             model=model,
             n=n,
             seed=seed,

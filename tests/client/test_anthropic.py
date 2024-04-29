@@ -6,12 +6,13 @@ from anthropic.types.beta.tools.tools_beta_message import ToolsBetaMessage
 from anthropic.types.text_block import TextBlock
 from anthropic.types.usage import Usage
 
-from meadow.agent.schema import ChatMessage, ToolCall
 from meadow.client.api.anthropic import AnthropicClient
 from meadow.client.schema import (
+    ChatMessage,
     ChatRequest,
     ChatResponse,
     Choice as MeadowChoice,
+    ToolCall,
     Usage as MeadowUsage,
 )
 
@@ -63,7 +64,6 @@ def test_convert_request_for_anthropic(
     assert request_dict == {
         "messages": [{"role": "user", "content": "Say this is a test"}],
         "model": "gpt-3.5-turbo",
-        "n": 1,
         "tools": [
             {
                 "name": "query_gen",
@@ -90,7 +90,6 @@ def test_convert_request_for_anthropic(
     assert request_dict == {
         "messages": [{"role": "user", "content": "Say this is a test"}],
         "model": "gpt-3.5-turbo",
-        "n": 1,
         "stop_sequences": ["stop"],
         "tools": [
             {
@@ -131,7 +130,7 @@ def test_convert_anthropic_to_response(
                         role="assistant",
                         tool_calls=[
                             ToolCall(
-                                arguments='{"question": "How many cats do I have?"}',
+                                unparsed_arguments='{"question": "How many cats do I have?"}',
                                 name="query_gen",
                             )
                         ],
@@ -180,7 +179,7 @@ def test_convert_anthropic_to_multi_messageresponse(
                         role="assistant",
                         tool_calls=[
                             ToolCall(
-                                arguments='{"question": "How many cats do I have?"}',
+                                unparsed_arguments='{"question": "How many cats do I have?"}',
                                 name="query_gen",
                             )
                         ],
@@ -193,7 +192,7 @@ def test_convert_anthropic_to_multi_messageresponse(
                         role="assistant",
                         tool_calls=[
                             ToolCall(
-                                arguments='{"question": "Cats are dead to me?"}',
+                                unparsed_arguments='{"question": "Cats are dead to me?"}',
                                 name="query_gen",
                             )
                         ],
@@ -236,7 +235,7 @@ async def test_arun_chat(
                         role="assistant",
                         tool_calls=[
                             ToolCall(
-                                arguments='{"question": "How many cats do I have?"}',
+                                unparsed_arguments='{"question": "How many cats do I have?"}',
                                 name="query_gen",
                             )
                         ],

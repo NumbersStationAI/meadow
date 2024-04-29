@@ -1,15 +1,22 @@
 import json
+import logging
 import time
 
-import structlog
 from anthropic import AsyncAnthropic
 from anthropic.types.beta.tools.tools_beta_message import ToolsBetaMessage
 
-from meadow.agent.schema import ChatMessage, ToolCall
 from meadow.client.api.api_client import APIClient
-from meadow.client.schema import ChatRequest, ChatResponse, Choice, Usage
+from meadow.client.schema import (
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    Choice,
+    ToolCall,
+    Usage,
+)
 
-logger = structlog.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
 
 DEFAULT_MAX_TOKENS = 100
 
@@ -74,7 +81,7 @@ class AnthropicClient(APIClient):
                 tool_calls.append(
                     ToolCall(
                         name=choice.name,
-                        arguments=json.dumps(choice.input),
+                        unparsed_arguments=json.dumps(choice.input),
                     )
                 )
             elif choice.type == "text":
@@ -122,12 +129,19 @@ class AnthropicClient(APIClient):
 
     async def arun_chat(self, request: ChatRequest) -> ChatResponse:
         """Send a chat request."""
+        # isolate the system message as Anthropic requires it as separate input
+        system_msg = None
+        if request.messages[0]["role"] == "system":
+            # copy request to avoid modifying the original
+            request = request.model_copy()
+            system_msg = request.messages[0]["content"]
+            request.messages = request.messages[1:]
         # convert the request to Anthropic format
         anthropic_request = self.convert_request_for_anthropic(request)
         # send the request to Anthropic
         anthropic_response = await self.client.beta.tools.messages.create(
-            **anthropic_request
-        )
+            **anthropic_request, system=system_msg
+        )  # type: ignore
         # convert the response to ChatResponse
         response = self.convert_anthropic_to_response(anthropic_response)
         return response

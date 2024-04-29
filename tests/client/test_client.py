@@ -2,11 +2,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from meadow.agent.schema import ChatMessage, ToolCall
 from meadow.cache.cache import Cache
 from meadow.client.api.api_client import APIClient
 from meadow.client.client import Client
-from meadow.client.schema import ChatResponse, Choice, Usage
+from meadow.client.schema import ChatMessage, ChatResponse, Choice, ToolCall, Usage
 
 
 @pytest.fixture
@@ -22,7 +21,7 @@ def chat_response() -> ChatResponse:
                     role="assistant",
                     tool_calls=[
                         ToolCall(
-                            arguments='{"question":"What is the total revenue by product category for the year 2021?"}',
+                            unparsed_arguments='{"question":"What is the total revenue by product category for the year 2021?"}',
                             name="query_gen",
                         )
                     ],
@@ -54,7 +53,7 @@ async def test_without_prompt(api_client: APIClient) -> None:
     """Test fails with None prompts."""
     client = Client(api_client=api_client)
     with pytest.raises(ValueError):
-        await client.chat(prompt=None)
+        await client.chat(messages=None)
 
 
 @pytest.mark.asyncio
@@ -62,7 +61,7 @@ async def test_without_model(api_client: APIClient) -> None:
     """Test fails with None prompts."""
     client = Client(api_client=api_client)
     with pytest.raises(ValueError):
-        await client.chat(prompt=[{"text": "Hello"}])
+        await client.chat(messages=[{"text": "Hello"}])
 
 
 @pytest.mark.asyncio
@@ -74,7 +73,7 @@ async def test_chat_with_cache_hit(
     cache, _ = duckdb_cache
     client = Client(api_client=api_client, cache=cache, model="test_model")
     chat_request = {
-        "prompt": [{"role": "user", "content": "Say this is a test"}],
+        "messages": [{"role": "user", "content": "Say this is a test"}],
     }
 
     assert len(cache.get_all_keys()) == 0

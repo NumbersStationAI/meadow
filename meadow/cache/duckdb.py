@@ -51,6 +51,7 @@ class DuckDBCache(Cache):
             "INSERT INTO cache (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value",
             (key, value),
         )
+        self.commit()
 
     def get_all_keys(self) -> list[str]:
         """

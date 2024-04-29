@@ -9,12 +9,13 @@ from openai.types.chat.chat_completion_message_tool_call import (
 )
 from openai.types.completion_usage import CompletionUsage
 
-from meadow.agent.schema import ChatMessage, ToolCall
 from meadow.client.api.openai import OpenAIClient
 from meadow.client.schema import (
+    ChatMessage,
     ChatRequest,
     ChatResponse,
     Choice as MeadowChoice,
+    ToolCall,
     Usage,
 )
 
@@ -161,7 +162,7 @@ def test_convert_openai_to_response(
                     role="assistant",
                     tool_calls=[
                         ToolCall(
-                            arguments='{"question":"What is the total revenue by product category for the year 2021?"}',
+                            unparsed_arguments='{"question":"What is the total revenue by product category for the year 2021?"}',
                             name="query_gen",
                         )
                     ],

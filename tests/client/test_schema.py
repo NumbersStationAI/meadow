@@ -1,4 +1,4 @@
-from meadow.client.schema import FunctionArgSpec, ToolSpec
+from meadow.client.schema import FunctionArgSpec, ToolCall, ToolSpec
 
 
 def test_tool_spec_serialization() -> None:
@@ -57,3 +57,21 @@ def test_tool_spec_serialization() -> None:
     }
 
     assert tool_spec.model_dump() == expected
+
+
+def test_tool_arguments() -> None:
+    """Test derived attribute arguments."""
+
+    tool_call = ToolCall(
+        name="test_tool",
+        unparsed_arguments='{"arg1": "value1", "arg2": 2, "arg3": ["value3"]}',
+    )
+    assert tool_call.arguments == {
+        "arg1": "value1",
+        "arg2": 2,
+        "arg3": ["value3"],
+    }
+
+    # Test parse error is caught
+    tool_call = ToolCall(name="test_tool", unparsed_arguments='{"arg1": "value1"')
+    assert tool_call.arguments == {}

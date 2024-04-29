@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from meadow.agent.agent import Agent
-from meadow.agent.schema import ChatMessage
+from meadow.agent.schema import AgentMessage
 from meadow.history.message_history import MessageHistory
 
 
@@ -14,23 +14,31 @@ def mock_agent() -> Mock:
     return Mock(spec=Agent)
 
 
-@pytest.fixture
-def mock_message() -> Mock:
-    return Mock(spec=ChatMessage)
-
-
-def test_add_message_empty_history(mock_agent: Mock, mock_message: Mock) -> None:
+def test_add_message(mock_agent: Mock) -> None:
     """Test adding a message to an empty history."""
     message_history = MessageHistory()
     assert (
         mock_agent not in message_history.get_all_messages()
     )  # Ensure history is initially empty for the agent
-    message_history.add_message(mock_agent, mock_message)
-    assert message_history.get_messages(mock_agent) == [mock_message]
+
+    message = AgentMessage(
+        content="Hello, world!", generating_agent="test", role="user"
+    )
+    message_history.add_message(mock_agent, "user", message)
+    assert message_history.get_messages(mock_agent) == [message]
     # Adding another message
-    another_message = Mock(spec=ChatMessage)
-    message_history.add_message(mock_agent, another_message)
-    assert message_history.get_messages(mock_agent) == [mock_message, another_message]
+    another_message = AgentMessage(
+        content="Bye, world!", generating_agent="test", role="assistant"
+    )
+    message_history.add_message(mock_agent, "assistant", another_message)
+    assert message_history.get_messages(mock_agent) == [message, another_message]
+    # Add third message and switch roles
+    third_message = AgentMessage(
+        content="Hello again!", generating_agent="test", role="user"
+    )
+    message_history.add_message(mock_agent, "assistant", third_message)
+    assert message_history.get_messages(mock_agent)[-1].role == "assistant"
+    assert message_history.get_messages(mock_agent)[-1].content == "Hello again!"
 
 
 def test_get_messages_non_existent_agent(mock_agent: Mock) -> None:
@@ -44,13 +52,13 @@ def test_get_all_messages_multiple_agents() -> None:
     message_history = MessageHistory()
     agent_one = Mock(spec=Agent)
     agent_two = Mock(spec=Agent)
-    message_one = Mock(spec=ChatMessage)
-    message_two = Mock(spec=ChatMessage)
-    message_three = Mock(spec=ChatMessage)
+    message_one = Mock(spec=AgentMessage)
+    message_two = Mock(spec=AgentMessage)
+    message_three = Mock(spec=AgentMessage)
 
-    message_history.add_message(agent_one, message_one)
-    message_history.add_message(agent_two, message_two)
-    message_history.add_message(agent_one, message_three)
+    message_history.add_message(agent_one, "assistant", message_one)
+    message_history.add_message(agent_two, "assistant", message_two)
+    message_history.add_message(agent_one, "assistant", message_three)
 
     expected_history = {
         agent_one: [message_one, message_three],

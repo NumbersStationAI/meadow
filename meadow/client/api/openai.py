@@ -1,9 +1,15 @@
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
-from meadow.agent.schema import ChatMessage, ToolCall
 from meadow.client.api.api_client import APIClient
-from meadow.client.schema import ChatRequest, ChatResponse, Choice, Usage
+from meadow.client.schema import (
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    Choice,
+    ToolCall,
+    Usage,
+)
 
 
 class OpenAIClient(APIClient):
@@ -36,7 +42,7 @@ class OpenAIClient(APIClient):
                 tool_calls = [
                     ToolCall(
                         name=tool_call.function.name,
-                        arguments=tool_call.function.arguments,
+                        unparsed_arguments=tool_call.function.arguments,
                     )
                     for tool_call in choice.message.tool_calls
                 ]
@@ -69,7 +75,7 @@ class OpenAIClient(APIClient):
         # convert the request to OpenAI format
         openai_request = self.convert_request_for_openai(request)
         # send the request to OpenAI
-        openai_response = await self.client.chat.completions.create(**openai_request)
+        openai_response = await self.client.chat.completions.create(**openai_request)  # type: ignore
         # convert the response to ChatResponse
         response = self.convert_openai_to_response(openai_response)
         return response

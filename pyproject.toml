@@ -13,7 +13,8 @@ openai = "^1.23.2"
 nest-asyncio = "^1.6.0"
 duckdb = "^0.10.2"
 anthropic = "^0.25.6"
-structlog = "^24.1.0"
+colorama = "^0.4.6"
+sqlglot = "^23.12.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.1"
@@ -23,6 +24,7 @@ pre-commit = "^3.7.0"
 ipykernel = "^6.29.4"
 pytest-cov = "^5.0.0"
 pytest-asyncio = "^0.23.6"
+types-colorama = "^0.4.15.20240311"
 
 [build-system]
 requires = ["poetry-core"]
@@ -60,6 +62,8 @@ ignore = [
   "E731",
   # N812: lowercase imported as non-lowercase
   "N812",
+  # G004: f strings in logging statements
+  "G004",
 ]
 
 [tool.ruff.lint.isort]
