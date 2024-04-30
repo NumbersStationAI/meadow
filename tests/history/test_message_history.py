@@ -52,9 +52,15 @@ def test_get_all_messages_multiple_agents() -> None:
     message_history = MessageHistory()
     agent_one = Mock(spec=Agent)
     agent_two = Mock(spec=Agent)
-    message_one = Mock(spec=AgentMessage)
-    message_two = Mock(spec=AgentMessage)
-    message_three = Mock(spec=AgentMessage)
+    message_one = AgentMessage(
+        content="Hello, world!", role="assistant", generating_agent="agent_one"
+    )
+    message_two = AgentMessage(
+        content="Hello, world 2!", role="assistant", generating_agent="agent_two"
+    )
+    message_three = AgentMessage(
+        content="Hello, world 3!", role="assistant", generating_agent="agent_one"
+    )
 
     message_history.add_message(agent_one, "assistant", message_one)
     message_history.add_message(agent_two, "assistant", message_two)
@@ -65,3 +71,29 @@ def test_get_all_messages_multiple_agents() -> None:
         agent_two: [message_two],
     }
     assert message_history.get_all_messages() == expected_history
+
+
+def test_get_messages_skip_exit() -> None:
+    """Test getting all messages with multiple agents."""
+    message_history = MessageHistory()
+    agent_one = Mock(spec=Agent)
+    message_one = AgentMessage(
+        content="Hello, world!", role="assistant", generating_agent="agent_one"
+    )
+    message_two = AgentMessage(content="I'm done", role="user", generating_agent="user")
+    message_three = AgentMessage(
+        content="See ya <exit>",
+        role="assistant",
+        generating_agent="agent_one",
+        is_termination_message=True,
+    )
+    message_four = AgentMessage(
+        content="Show me cats", role="user", generating_agent="user"
+    )
+
+    message_history.add_message(agent_one, "assistant", message_one)
+    message_history.add_message(agent_one, "user", message_two)
+    message_history.add_message(agent_one, "assistant", message_three)
+    message_history.add_message(agent_one, "user", message_four)
+
+    assert message_history.get_messages(agent_one) == [message_one, message_four]

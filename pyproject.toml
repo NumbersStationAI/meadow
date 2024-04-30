@@ -65,6 +65,8 @@ ignore = [
   "N812",
   # G004: f strings in logging statements
   "G004",
+  # G003: + strings in logging statements
+  "G003",
 ]
 
 [tool.ruff.lint.isort]

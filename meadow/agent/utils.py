@@ -1,4 +1,5 @@
 import logging
+from typing import Callable
 
 from colorama import Fore, Style
 
@@ -41,6 +42,7 @@ async def generate_llm_reply(
     system_message: AgentMessage,
     model: str = None,
     llm_config: LLMConfig = LLMConfig(),
+    llm_callback: Callable = None,
     overwrite_cache: bool = False,
 ) -> ChatResponse:
     """Generate a reply using autogen.oai."""
@@ -58,6 +60,8 @@ async def generate_llm_reply(
         max_tokens=llm_config.max_tokens,
         overwrite_cache=overwrite_cache,
     )
+    if llm_callback:
+        llm_callback(serialized_messages, chat_response)
     # logger.info(
     #     "Ran model",
     #     prompts=serialized_messages,

@@ -8,36 +8,36 @@ from pydantic import BaseModel, model_validator
 class Column(BaseModel):
     """Column in a table."""
 
-    """Name of the column."""
     name: str
+    """Name of the column."""
 
-    """Data type of the column."""
     data_type: str
+    """Data type of the column."""
 
+    sample_values: list[Any] | None = None
     """Sample values in the column."""
-    sample_values: list[Any] = None
 
-    """Whether this column is a primary key"""
     primary_key: bool = False
+    """Whether this column is a primary key"""
 
+    foreign_keys: list[tuple[str, str]] | None = None
     """The table and column name this column references"""
-    foreign_key: tuple[str, str] = None
 
 
 class Table(BaseModel):
     """Table in the database."""
 
-    """Name of the table."""
     name: str
+    """Name of the table."""
 
-    """If view or not."""
     is_view: bool = False
+    """If view or not."""
 
+    columns: list[Column] | None = None
     """Columns in the table if base table."""
-    columns: list[Column] = None
 
+    view_sql: str | None = None
     """View sql definition if view."""
-    view_sql: str = None
 
     @model_validator(mode="after")
     def check_valid_view_or_base_table(self) -> "Table":
@@ -56,19 +56,19 @@ class Connector(ABC):
     @abstractmethod
     def dialect(self) -> str:
         """Get the dialect of the database."""
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def connect(self) -> None:
         """Connect to the database."""
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def run_sql_to_df(self, sql: str) -> pd.DataFrame:
         """Run an SQL query."""
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def get_tables(self) -> list[Table]:
         """Get the tables in the database."""
-        pass
+        pass  # pragma: no cover

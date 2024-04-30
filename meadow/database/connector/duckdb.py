@@ -9,11 +9,11 @@ from meadow.database.connector.connector import Column, Connector, Table
 class DuckDBConnector(Connector):
     """Connector for DuckDB."""
 
-    def __init__(self, cache_file: str) -> None:
+    def __init__(self, db_path: str) -> None:
         """Create DuckDB connector."""
-        self.cache_file = cache_file
-        if not Path(self.cache_file).exists():
-            raise FileNotFoundError(f"Cache file {self.cache_file} does not exist.")
+        self.db_path = db_path
+        if not Path(self.db_path).exists():
+            raise FileNotFoundError(f"Database file {self.db_path} does not exist.")
         self.conn: duckdb.DuckDBPyConnection = None
 
     @property
@@ -23,7 +23,7 @@ class DuckDBConnector(Connector):
 
     def connect(self) -> None:
         """Connect to the database."""
-        self.conn = duckdb.connect(self.cache_file)
+        self.conn = duckdb.connect(self.db_path)
 
     def commit(self) -> None:
         """Commit changes to the database."""

@@ -2,6 +2,7 @@
 
 import logging
 import re
+from typing import Callable
 
 import sqlglot
 
@@ -15,12 +16,12 @@ from meadow.agent.utils import (
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.database import Database
-from meadow.database.serializer import serializ_as_xml
+from meadow.database.serializer import serialize_as_xml
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQL_PROMPT = """Given the table schema and user's question, generate a DuckDB SQL query that answers it. If the query involves multiple steps, describe each step in detail. Use <sql1>, <sql2>, ... tags for the SQL, depending on if previous queries were talked about in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use a (SELECT * FROM sql#) subquery statement with the # is replaced with the number of the sql tag. Once the user is satisfied with the SQL, output {termination_message} tag.
+DEFAULT_SQL_PROMPT = """Given the table schema and user's question, generate a SQLite SQL query that answers it. Use <sql1>, <sql2>, ... tags for the SQL, depending on if previous queries were talked about in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use a (SELECT * FROM sql#) subquery statement with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, simply output {termination_message} tag and nothing else. In other words, either output SQL or {termination_message} tag, but not both.
 
 {schema}
 """
@@ -77,8 +78,9 @@ class SQLGeneratorAgent(DataAgent):
         database: Database,
         system_prompt: str = DEFAULT_SQL_PROMPT,
         termination_message: str = "<exit>",
-        overwriting_cache: bool = False,
+        overwrite_cache: bool = False,
         silent: bool = True,
+        llm_callback: Callable = None,
     ):
         """Initialize the SQL generator agent."""
         self._client = client
@@ -86,8 +88,9 @@ class SQLGeneratorAgent(DataAgent):
         self._database = database
         self._system_prompt = system_prompt
         self._termination_message = termination_message
-        self._overwriting_cache = overwriting_cache
+        self._overwrite_cache = overwrite_cache
         self._silent = silent
+        self._llm_callback = llm_callback
         self._messages = MessageHistory()
 
     @property
@@ -113,7 +116,7 @@ class SQLGeneratorAgent(DataAgent):
     @property
     def system_message(self) -> str:
         """Get the system message."""
-        serialized_schema = serializ_as_xml(self.database.tables)
+        serialized_schema = serialize_as_xml(self.database.tables)
         return self._system_prompt.format(
             schema=serialized_schema, termination_message=self._termination_message
         )
@@ -165,7 +168,8 @@ class SQLGeneratorAgent(DataAgent):
                 generating_agent=self.name,
             ),
             llm_config=self._llm_config,
-            overwrite_cache=self._overwriting_cache,
+            llm_callback=self._llm_callback,
+            overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
         # print("SQL AGENT CONTENT", content)
@@ -190,7 +194,7 @@ class SQLGeneratorAgent(DataAgent):
                 else:
                     v = replace_tag_with_table(v)
                     v = self.database.normalize_query(v)
-                    self.database.add_view(name=k, sql=v, normalize_to_base_tables=True)
+                    self.database.add_view(name=k, sql=v)
             # get the last sql and return it fully parsed
             last_sql = prettify_sql(self.database.get_table(largest_k).view_sql)
             try:

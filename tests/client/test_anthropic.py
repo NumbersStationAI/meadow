@@ -13,6 +13,7 @@ from meadow.client.schema import (
     ChatResponse,
     Choice as MeadowChoice,
     ToolCall,
+    ToolSpec,
     Usage as MeadowUsage,
 )
 
@@ -220,7 +221,7 @@ async def test_arun_chat(
     anthropic_client.client.beta.tools.messages.create = mock_response
     response = await anthropic_client.arun_chat(chat_request)
     anthropic_client.client.beta.tools.messages.create.assert_called_once_with(
-        **anthropic_client.convert_request_for_anthropic(chat_request)
+        **anthropic_client.convert_request_for_anthropic(chat_request), system=None
     )
     assert (
         response
@@ -248,4 +249,41 @@ async def test_arun_chat(
                 completion_tokens=100, prompt_tokens=495, total_tokens=595
             ),
         )
+    )
+
+    # now test that if the first message is a system message, we pass it as `system`
+    chat_request_system = ChatRequest(
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a tester",
+            },
+            {
+                "role": "user",
+                "content": "Say this is a test",
+            },
+        ],
+        model="gpt-3.5-turbo",
+        tools=[
+            ToolSpec(
+                name="query_gen",
+                description="Query generator",
+                function_args=[
+                    {
+                        "name": "question",
+                        "description": "The question to generate a query for",
+                        "type": "string",
+                        "required": True,
+                    }
+                ],
+            )
+        ],
+    )
+    mock_response = AsyncMock(return_value=chat_completion)
+    anthropic_client.client.beta.tools.messages.create = mock_response
+    response = await anthropic_client.arun_chat(chat_request_system)
+    anthropic_client.client.beta.tools.messages.create.assert_called_once_with(
+        # We use the original chat_request for conversion here as it doens't have system message
+        **anthropic_client.convert_request_for_anthropic(chat_request),
+        system="You are a tester",
     )

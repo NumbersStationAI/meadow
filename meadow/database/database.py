@@ -34,6 +34,7 @@ class Database:
     """Representation of database."""
 
     def __init__(self, connector: Connector) -> None:
+        """Initialize the database."""
         self._connector = connector
         self._connector.connect()
 
@@ -56,16 +57,8 @@ class Database:
         """Run an SQL query."""
         return self._connector.run_sql_to_df(sql)
 
-    def add_view(self, name: str, sql: str, normalize_to_base_tables: bool) -> None:
-        """Add a view to the database.
-
-        If normalize_to_base_tables is True, the view will be rewritten to contain no subviews.
-
-        E.g.
-            SELECT * FROM <view_def>
-        will be rewritten to
-            SELECT * FROM (SELECT * FROM <base_tables>)
-        """
+    def add_view(self, name: str, sql: str) -> None:
+        """Add a view to the database."""
         valid, error = validate_sql(sql, self._connector.dialect)
         if not valid:
             raise ValueError(

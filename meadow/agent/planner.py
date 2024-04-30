@@ -93,7 +93,7 @@ class PlannerAgent(LLMAgent):
         llm_config: LLMConfig,
         system_prompt: str = DEFAULT_PLANNER_PROMPT,
         termination_message: str = "<exit>",
-        overwriting_cache: bool = False,
+        overwrite_cache: bool = False,
         silent: bool = True,
     ):
         """Initialize the planner agent."""
@@ -107,7 +107,7 @@ class PlannerAgent(LLMAgent):
         self._plan_index = -1
         self._plan: list[SubTask] = []
         self._termination_message = termination_message
-        self._overwriting_cache = overwriting_cache
+        self._overwrite_cache = overwrite_cache
         self._silent = silent
 
     @property
@@ -207,7 +207,7 @@ class PlannerAgent(LLMAgent):
                 generating_agent=self.name,
             ),
             llm_config=self._llm_config,
-            overwrite_cache=self._overwriting_cache,
+            overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
         # print("CONTENT PLANNER", content)
