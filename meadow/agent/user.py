@@ -2,6 +2,7 @@ import logging
 
 from meadow.agent.agent import Agent
 from meadow.agent.schema import AgentMessage
+from meadow.agent.utils import print_message
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,12 @@ class UserAgent(Agent):
         sender: Agent,
     ) -> None:
         """Receive a message from another agent."""
+        if not self._silent:
+            print_message(
+                message,
+                from_agent=sender.name,
+                to_agent=self.name,
+            )
         reply = await self.generate_reply(messages=[message], sender=sender)
         await self.send(reply, sender)
 
@@ -59,5 +66,5 @@ class UserAgent(Agent):
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
         # Get the input from a user
-        reply = input("REPLY>>>")
+        reply = input(">>> ")
         return AgentMessage(role="assistant", content=reply, generating_agent=self.name)

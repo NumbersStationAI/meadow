@@ -16,11 +16,13 @@ def print_message(message: AgentMessage, from_agent: str, to_agent: str) -> None
     else:
         content = message.content
     if from_agent == "User":
-        color = Fore.GREEN
+        color = Fore.YELLOW
     elif from_agent == "Controller":
         color = Fore.BLUE
-    else:
+    elif from_agent == "Planner":
         color = Fore.RED
+    else:
+        color = Fore.GREEN
     to_print = f"{from_agent} -> {to_agent}: {content}"
     print(color + to_print + Style.RESET_ALL)
 

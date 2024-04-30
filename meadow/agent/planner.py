@@ -2,9 +2,9 @@
 
 import logging
 import re
+import xml.etree.ElementTree as ElementTree
 
 from pydantic import BaseModel
-import xml.etree.ElementTree as ET
 
 from meadow.agent.agent import Agent, LLMAgent
 from meadow.agent.schema import AgentMessage
@@ -65,9 +65,9 @@ def parse_plan(message: str) -> list[SubTask]:
     if "<steps>" not in message:
         raise ValueError("Plan not found in the response.")
     inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
-    plan = []
+    plan: list[SubTask] = []
     try:
-        root = ET.fromstring(inner_steps)  # Parse the XML string
+        root = ElementTree.fromstring(inner_steps)  # Parse the XML string
         for step in root:
             agent = (
                 step.find("agent").text if step.find("agent") is not None else "Unknown"
@@ -78,7 +78,7 @@ def parse_plan(message: str) -> list[SubTask]:
                 else "No instruction"
             )
             plan.append(SubTask(index=len(plan), agent=agent, prompt=instruction))
-    except ET.ParseError:
+    except ElementTree.ParseError:
         logger.error(f"Failed to parse the message as XML. message={message}")
     return plan
 
@@ -144,11 +144,12 @@ class PlannerAgent(LLMAgent):
 
     def move_to_next_agent(
         self,
-    ) -> tuple[Agent, str]:
+    ) -> tuple[Agent | None, str | None]:
         """Move to the next agent in the task plan."""
         self._plan_index += 1
         if self._plan_index >= len(self._plan):
-            raise ValueError("No more agents in the plan.")
+            logger.warning("No more sub-tasks in the plan.")
+            return None, None
         sub_task = self._plan[self._plan_index]
         agent = self._available_agents[sub_task.agent]
         return agent, sub_task.prompt
@@ -209,7 +210,8 @@ class PlannerAgent(LLMAgent):
             overwrite_cache=self._overwriting_cache,
         )
         content = chat_response.choices[0].message.content
-        print("CONTENT PLANNER", content)
+        # print("CONTENT PLANNER", content)
+        # print("*****")
         if has_termination_condition(content, self._termination_message):
             return AgentMessage(
                 role="assistant",

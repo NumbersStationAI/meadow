@@ -1,5 +1,6 @@
 from meadow.agent.schema import AgentMessage
 from meadow.client.client import Client
+from meadow.database.database import Database
 
 
 class Agent:
@@ -51,6 +52,6 @@ class DataAgent(LLMAgent):
     """Agent for data tasks."""
 
     @property
-    def table(self) -> str:
-        """The table used by the agent."""
+    def database(self) -> Database:
+        """The database used by the agent."""
         ...

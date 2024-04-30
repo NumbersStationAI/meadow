@@ -25,6 +25,7 @@ ipykernel = "^6.29.4"
 pytest-cov = "^5.0.0"
 pytest-asyncio = "^0.23.6"
 types-colorama = "^0.4.15.20240311"
+pandas-stubs = "^2.2.1.240316"
 
 [build-system]
 requires = ["poetry-core"]

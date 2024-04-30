@@ -26,7 +26,7 @@ class AgentMessage(ChatMessage):
     is_termination_message: bool = False
 
     @model_validator(mode="after")
-    def set_default_second_attr(self):
+    def set_default_second_attr(self) -> "AgentMessage":
         """
         Set second_attr to the value of first_attr if second_attr is not explicitly provided.
         """

@@ -83,6 +83,7 @@ class ControllerAgent(Agent):
         else:
             await self.send(reply, self._current_task_agent)
 
+    # TODO: move this into a validator agent that runs and error messages with other agents
     async def generate_tool_call_reply(
         self,
         message: AgentMessage,
@@ -133,6 +134,15 @@ class ControllerAgent(Agent):
                 self._current_task_agent, next_message = (
                     self._planner.move_to_next_agent()
                 )
+                # If the planner has no more steps, then we should terminate the conversation
+                if self._current_task_agent is None:
+                    return AgentMessage(
+                        role="assistant",
+                        content=self._termination_message,
+                        generating_agent=self.name,
+                        need_user_feedback=True,
+                        is_termination_message=True,
+                    )
                 return AgentMessage(
                     role="assistant", content=next_message, generating_agent=self.name
                 )
@@ -142,6 +152,7 @@ class ControllerAgent(Agent):
             return AgentMessage(
                 role="assistant",
                 content=messages[-1].content,
+                display_content=messages[-1].display_content,
                 generating_agent=self.name,
                 need_user_feedback=(sender != self._user),
             )
@@ -152,7 +163,6 @@ class ControllerAgent(Agent):
         max_plan_steps: int = 1,
     ) -> dict[Agent, list[AgentMessage]]:
         """Chat of user with the agent."""
-        # Generate the plan
         step_itr = 0
         while step_itr < max_plan_steps:
             if step_itr == 0:
