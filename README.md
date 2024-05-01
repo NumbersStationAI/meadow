@@ -5,7 +5,9 @@ Framework for building data agent workflows
 >
 > --Richard Brautigan
 
-<img src="assets/meadow_image.png" alt="Cybernetic Meadow" style="display: block; margin: 0 auto" />
+<p align="center">
+<img src="assets/meadow_image.png" alt="Cybernetic Meadow"/>
+</p>
 
 # Setup
 ## Install
