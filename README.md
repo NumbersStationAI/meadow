@@ -1,5 +1,11 @@
-# meadow
+# Meadow
 Framework for building data agent workflows
+
+> I like to think (and the sooner the better!) of a cybernetic meadow where mammals and computers live together in mutually programming harmony like pure water touching clear sky.
+>
+> --Richard Brautigan
+
+![Cybernetic Meadow](assets/meadow_image.png)
 
 # Setup
 ## Install

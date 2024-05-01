@@ -64,6 +64,11 @@ class Connector(ABC):
         pass  # pragma: no cover
 
     @abstractmethod
+    def close(self) -> None:
+        """Close the connection to the database."""
+        pass  # pragma: no cover
+
+    @abstractmethod
     def run_sql_to_df(self, sql: str) -> pd.DataFrame:
         """Run an SQL query."""
         pass  # pragma: no cover

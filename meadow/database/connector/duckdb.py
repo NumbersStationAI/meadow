@@ -25,6 +25,11 @@ class DuckDBConnector(Connector):
         """Connect to the database."""
         self.conn = duckdb.connect(self.db_path)
 
+    def close(self) -> None:
+        """Close the connection to the database."""
+        if self.conn:
+            self.conn.close()
+
     def commit(self) -> None:
         """Commit changes to the database."""
         self.conn.commit()
