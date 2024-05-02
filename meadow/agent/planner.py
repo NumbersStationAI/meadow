@@ -3,6 +3,7 @@
 import logging
 import re
 import xml.etree.ElementTree as ElementTree
+from typing import Callable
 
 from pydantic import BaseModel
 
@@ -32,7 +33,7 @@ DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the use
 ...
 </steps>
 
-Once the user is satisfied with the plan, please output {termination_message} tag instead of a plan.
+If the user responds back at some point with a message that indicates the user is satisfied with the plan, please output {termination_message} and nothing else. In other words, only output a plan or {termination_message}.
 
 Below are the agents you have access to.
 
@@ -95,6 +96,7 @@ class PlannerAgent(LLMAgent):
         termination_message: str = "<exit>",
         overwrite_cache: bool = False,
         silent: bool = True,
+        llm_callback: Callable = None,
     ):
         """Initialize the planner agent."""
         self._available_agents = {a.name: a for a in available_agents}
@@ -102,12 +104,13 @@ class PlannerAgent(LLMAgent):
         self._llm_config = llm_config
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
-        # start at -1 so when we first call move to next task,
+        # start at -1 so when we first call move to next subtask,
         # i.e. start the task, it will be 0
         self._plan_index = -1
         self._plan: list[SubTask] = []
         self._termination_message = termination_message
         self._overwrite_cache = overwrite_cache
+        self._llm_callback = llm_callback
         self._silent = silent
 
     @property
@@ -197,6 +200,14 @@ class PlannerAgent(LLMAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
+        if "Looks good. Go on to next step." in messages[-1].content:
+            return AgentMessage(
+                role="assistant",
+                content=self._termination_message,
+                tool_calls=None,
+                generating_agent=self.name,
+                is_termination_message=True,
+            )
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -207,6 +218,7 @@ class PlannerAgent(LLMAgent):
                 generating_agent=self.name,
             ),
             llm_config=self._llm_config,
+            llm_callback=self._llm_callback,
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content

@@ -89,8 +89,8 @@ class SQLGeneratorAgent(DataAgent):
         self._system_prompt = system_prompt
         self._termination_message = termination_message
         self._overwrite_cache = overwrite_cache
-        self._silent = silent
         self._llm_callback = llm_callback
+        self._silent = silent
         self._messages = MessageHistory()
 
     @property
@@ -158,6 +158,14 @@ class SQLGeneratorAgent(DataAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
+        if "Looks good. Go on to next step." in messages[-1].content:
+            return AgentMessage(
+                role="assistant",
+                content=self._termination_message,
+                tool_calls=None,
+                generating_agent=self.name,
+                is_termination_message=True,
+            )
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -174,7 +182,8 @@ class SQLGeneratorAgent(DataAgent):
         content = chat_response.choices[0].message.content
         # print("SQL AGENT CONTENT", content)
         # print("*****")
-        if has_termination_condition(content, self._termination_message):
+        # TODO: fix the ending conditions
+        if False and has_termination_condition(content, self._termination_message):
             return AgentMessage(
                 role="assistant",
                 content=content,
@@ -183,24 +192,40 @@ class SQLGeneratorAgent(DataAgent):
                 is_termination_message=True,
             )
         else:
-            sql_dict = parse_sqls(content)
-            # update history with new SQL
-            largest_k = max(sql_dict.keys(), key=lambda x: int(x[3:]))
-            for k, v in sql_dict.items():
-                if view_table := self.database.get_table(k):
-                    if v != view_table.view_sql:
-                        print("BAD", k, "\n", view_table.view_sql, "*****\n", v)
-                    continue
-                else:
-                    v = replace_tag_with_table(v)
-                    v = self.database.normalize_query(v)
-                    self.database.add_view(name=k, sql=v)
-            # get the last sql and return it fully parsed
-            last_sql = prettify_sql(self.database.get_table(largest_k).view_sql)
             try:
-                last_sql_df = self.database.run_sql_to_df(last_sql).head(5)
+                sql_dict = parse_sqls(content)
+                # update history with new SQL
+                largest_k = max(sql_dict.keys(), key=lambda x: int(x[3:]))
+                for k, v in sql_dict.items():
+                    if view_table := self.database.get_table(k):
+                        if v != view_table.view_sql:
+                            print("BAD", k, "\n", view_table.view_sql, "*****\n", v)
+                        continue
+                    else:
+                        v = replace_tag_with_table(v)
+                        v = self.database.normalize_query(v)
+                        # TODO: add reask
+                        try:
+                            self.database.add_view(name=k, sql=v)
+                        except Exception as e:
+                            logger.warning(f"Failed to add view to database. e={e}")
+                            pass
+                try:
+                    # get the last sql and return it fully parsed
+                    last_sql = prettify_sql(self.database.get_table(largest_k).view_sql)
+                except Exception as e:
+                    logger.warning(f"Failed to get last SQL from database. e={e}")
+                    last_sql = ""
+                try:
+                    last_sql_df = self.database.run_sql_to_df(last_sql).head(5)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to run SQL in DuckDB. sql={last_sql}, e={e}"
+                    )
+                    last_sql_df = None
             except Exception as e:
-                logger.warning(f"Failed to run SQL in DuckDB. sql={last_sql}, e={e}")
+                logger.warning(f"Failed to parse SQL in response. e={e}")
+                last_sql = ""
                 last_sql_df = None
             user_content = f"SQL:\n{last_sql}"
             if last_sql_df is not None:
