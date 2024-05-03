@@ -52,11 +52,12 @@ async def agenerate_sql(
     client: Client,
     llm_config: LLMConfig,
     overwrite_cache: bool,
-    all_prompts_db: duckdb.DuckDBPyConnection,
+    # all_prompts_db: duckdb.DuckDBPyConnection,
 ) -> tuple[list[Agent], list[list[PromptLog]]]:
     """Async SQL generation."""
     text_to_sql_for_gather = []
     agents_gather = []
+    all_prompts_to_save: list[list[PromptLog]] = [[] for _ in text_to_sql_in]
     for i, text_to_sql in enumerate(text_to_sql_in):
         # load database
         connector = SQLiteConnector(text_to_sql.database_path)
@@ -69,28 +70,25 @@ async def agenerate_sql(
             description="User agent",
         )
 
-        # Load agent and get prompt callbacks.
-        # Because we use the prompt log dir to save prompt logs, we don't
-        # need to keep track of all the prompt_callbacks as they all point to
-        # the same DB. We just need to keep one of the prompt_callbacks
+        # load agent
         if text_to_sql.agent_type == "text2sql":
-            agent, prompt_callbacks = get_simple_text2sql_agent(
+            agent = get_simple_text2sql_agent(
                 user_agent=user_agent,
                 client=client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
-                all_prompts_db=all_prompts_db,
+                all_prompts_to_save=all_prompts_to_save,
                 example_idx=i,
             )
         elif text_to_sql.agent_type == "text2sql_with_plan":
-            agent, prompt_callbacks = get_simple_text2sql_planner_agent(
+            agent = get_simple_text2sql_planner_agent(
                 user_agent=user_agent,
                 client=client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
-                all_prompts_db=all_prompts_db,
+                all_prompts_to_save=all_prompts_to_save,
                 example_idx=i,
             )
         else:
@@ -103,20 +101,7 @@ async def agenerate_sql(
         )
         text_to_sql_for_gather.append(agent.receive(message, user_agent))
     await asyncio.gather(*text_to_sql_for_gather)
-
-    # Read prompt logs from DB
-    all_prompts: list[list[PromptLog]] = [[] for _ in range(len(text_to_sql_in))]
-    for prompt_cb in prompt_callbacks:
-        all_prompts_cb = prompt_cb.get_all_prompts()
-        all_prompts_cb_dict = {p.example_idx: p for p in all_prompts_cb}
-        for i in range(len(text_to_sql_in)):
-            all_prompts[i].append(all_prompts_cb_dict.get(i, None))
-    for prompt_cb in prompt_callbacks:
-        # N.B. manually close the prompt callback to clear the table. For some reason if
-        # we don't delete the table correctly, the data will stay around even if we
-        # remove the folder
-        prompt_cb.drop_data()
-    return agents_gather, all_prompts
+    return agents_gather, all_prompts_to_save
 
 
 def generate_sql(
@@ -128,13 +113,13 @@ def generate_sql(
 ) -> tuple[list[AgentMessage], list[list[PromptLog]]]:
     """Ask agent to generate SQL."""
     # Create a temporary folder to store prompt logs
-    tmp_fld = Path(tempfile.gettempdir()) / "meadow" / "prompt_logs"
-    if tmp_fld.exists():
-        shutil.rmtree(tmp_fld)
-    tmp_fld.mkdir(parents=True, exist_ok=True)
-    prompt_log_file = tmp_fld / "prompt_logs.db"
-    console.print(f"Storing prompt logs in {prompt_log_file}")
-    all_prompts_db = duckdb.connect(str(prompt_log_file))
+    # tmp_fld = Path(tempfile.gettempdir()) / "meadow" / "prompt_logs"
+    # if tmp_fld.exists():
+    #     shutil.rmtree(tmp_fld)
+    # tmp_fld.mkdir(parents=True, exist_ok=True)
+    # prompt_log_file = tmp_fld / "prompt_logs.db"
+    # console.print(f"Storing prompt logs in {prompt_log_file}")
+    # all_prompts_db = duckdb.connect(str(prompt_log_file))
 
     # Batch inputs for asyncio
     text_to_sql_in_batches = [
@@ -150,13 +135,13 @@ def generate_sql(
                 client=client,
                 llm_config=llm_config,
                 overwrite_cache=overwrite_cache,
-                all_prompts_db=all_prompts_db,
+                # all_prompts_db=all_prompts_db,
             )
         )
         agents.extend(response_agent_batch)
         all_prompts_list.extend(all_prompts_batch)
 
-    all_prompts_db.close()
+    # all_prompts_db.close()
     assert len(agents) == len(all_prompts_list)
     # Extract the sql responses from each agent chat
     sql_responses = []

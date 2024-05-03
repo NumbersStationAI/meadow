@@ -153,7 +153,7 @@ class PlannerAgent(LLMAgent):
         """Move to the next agent in the task plan."""
         self._plan_index += 1
         if self._plan_index >= len(self._plan):
-            logger.warning("No more sub-tasks in the plan.")
+            # logger.warning("No more sub-tasks in the plan.")
             return None, None
         sub_task = self._plan[self._plan_index]
         agent = self._available_agents[sub_task.agent]
@@ -203,7 +203,7 @@ class PlannerAgent(LLMAgent):
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
         # If the last message is the "move on" message, just move on and avoid a model call
-        print(messages[-1].content)
+        # print(messages[-1].content)
         if has_signal_string(
             messages[-1].content.replace("</feedback>", ""), self._move_on_message
         ):
@@ -228,8 +228,8 @@ class PlannerAgent(LLMAgent):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        print("CONTENT PLANNER", content)
-        print("*****")
+        # print("CONTENT PLANNER", content)
+        # print("*****")
         if has_signal_string(content, self._termination_message):
             return AgentMessage(
                 role="assistant",

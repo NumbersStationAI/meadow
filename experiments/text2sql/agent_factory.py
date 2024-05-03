@@ -1,8 +1,5 @@
-import json
 import logging
-from pathlib import Path
 
-import duckdb
 from pydantic import BaseModel
 
 from meadow.agent.agent import Agent
@@ -41,68 +38,23 @@ class PromptLog(BaseModel):
         return final_str
 
 
-class PromptCallback:
-    """Prompt callback."""
-
-    def __init__(
-        self,
-        agent_name: str,
-        example_idx: int,
-        all_prompts_db: duckdb.DuckDBPyConnection,
-    ):
-        """Initialize."""
-        self.agent_name = agent_name
-        self.example_idx = example_idx
-        self.all_prompts_db = all_prompts_db
-        self._create_table(agent_name)
-
-    def _create_table(self, table_name: str):
-        # Create table for json data of not exist
-        self.all_prompts_db.begin()
-        self.all_prompts_db.execute(
-            f"CREATE TABLE IF NOT EXISTS {table_name} (example_idx INTEGER, messages JSON, response JSON)"
+def model_callback(
+    model_messages: list[dict],
+    chat_response: ChatResponse,
+    i: int,
+    agent_name: str,
+    all_prompts: list[list[PromptLog]],
+):
+    """Call to store messages and response."""
+    # Insert the messages into the database
+    all_prompts[i].append(
+        PromptLog(
+            agent_name=agent_name,
+            example_idx=i,
+            messages=[ChatMessage.model_validate(m) for m in model_messages],
+            response=chat_response,
         )
-        self.all_prompts_db.commit()
-
-    def __call__(self, model_messages: list[dict], chat_response: ChatResponse):
-        """Call to store messages and response."""
-        # Insert the messages into the database
-        self.all_prompts_db.begin()
-        self.all_prompts_db.execute(
-            f"INSERT INTO {self.agent_name} VALUES (?, ?, ?)",
-            (
-                self.example_idx,
-                model_messages,
-                chat_response.model_dump(),
-            ),
-        )
-        self.all_prompts_db.commit()
-
-    def drop_data(self):
-        """Close the database."""
-        self.all_prompts_db.begin()
-        self.all_prompts_db.execute(f"DROP TABLE {self.agent_name}")
-        self.all_prompts_db.commit()
-
-    def get_all_prompts(self) -> list[PromptLog]:
-        """Get all the prompts."""
-        results = self.all_prompts_db.execute(
-            f"SELECT * FROM {self.agent_name}"
-        ).fetchall()
-        parsed_results: list[PromptLog] = []
-        for result in results:
-            ex_idx, messages, response = result
-            parsed_results.append(
-                PromptLog(
-                    agent_name=self.agent_name,
-                    example_idx=ex_idx,
-                    messages=[
-                        ChatMessage.model_validate(m) for m in json.loads(messages)
-                    ],
-                    response=ChatResponse.model_validate_json(response),
-                )
-            )
-        return sorted(parsed_results, key=lambda x: x.example_idx)
+    )
 
 
 def get_simple_text2sql_agent(
@@ -111,19 +63,27 @@ def get_simple_text2sql_agent(
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
-    all_prompts_db: duckdb.DuckDBPyConnection,
+    # all_prompts_db: duckdb.DuckDBPyConnection,
+    all_prompts_to_save: list,
     example_idx: int,
-) -> tuple[Agent, list[PromptCallback]]:
+) -> Agent:
     """Get a simple text2sql agent."""
-    prompt_callback = PromptCallback("SQLGeneratorAgent", example_idx, all_prompts_db)
+    callback = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "SQLGeneratorAgent",
+        all_prompts_to_save,
+    )
+    # prompt_callback = PromptCallback("SQLGeneratorAgent", example_idx, all_prompts_db)
     agent = SQLGeneratorAgent(
         client=client,
         llm_config=llm_config,
         database=database,
         overwrite_cache=overwrite_cache,
-        llm_callback=prompt_callback,
+        llm_callback=callback,
     )
-    return agent, [prompt_callback]
+    return agent
 
 
 def get_simple_text2sql_planner_agent(
@@ -132,29 +92,34 @@ def get_simple_text2sql_planner_agent(
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
-    all_prompts_db: Path,
+    # all_prompts_db: Path,
+    all_prompts_to_save: list,
     example_idx: int,
-) -> tuple[Agent, list[PromptCallback]]:
+) -> Agent:
     """Get a simple text2sql agent."""
-    sql_prompt_callback = PromptCallback(
-        "SQLGeneratorAgent", example_idx, all_prompts_db
+    callback_sql = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "SQLGeneratorAgent",
+        all_prompts_to_save,
     )
-    planner_prompt_callback = PromptCallback(
-        "PlannerAgent", example_idx, all_prompts_db
+    callback_planner = lambda model_messages, chat_response: model_callback(
+        model_messages, chat_response, example_idx, "PlannerAgent", all_prompts_to_save
     )
     text2sql = SQLGeneratorAgent(
         client=client,
         llm_config=llm_config,
         database=database,
         overwrite_cache=overwrite_cache,
-        llm_callback=sql_prompt_callback,
+        llm_callback=callback_sql,
     )
     planner = PlannerAgent(
         available_agents=[text2sql],
         client=client,
         llm_config=llm_config,
         overwrite_cache=overwrite_cache,
-        llm_callback=planner_prompt_callback,
+        llm_callback=callback_planner,
     )
     controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
-    return controller, [planner_prompt_callback, sql_prompt_callback]
+    return controller
