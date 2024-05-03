@@ -11,7 +11,7 @@ from meadow.agent.agent import Agent, LLMAgent
 from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
     generate_llm_reply,
-    has_termination_condition,
+    has_signal_string,
     print_message,
 )
 from meadow.client.client import Client
@@ -64,7 +64,7 @@ def parse_plan(message: str) -> list[SubTask]:
     </steps>.
     """
     if "<steps>" not in message:
-        raise ValueError("Plan not found in the response.")
+        raise ValueError(f"Plan not found in the response. message={message}")
     inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
     plan: list[SubTask] = []
     try:
@@ -94,6 +94,7 @@ class PlannerAgent(LLMAgent):
         llm_config: LLMConfig,
         system_prompt: str = DEFAULT_PLANNER_PROMPT,
         termination_message: str = "<exit>",
+        move_on_message: str = "<next>",
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -109,6 +110,7 @@ class PlannerAgent(LLMAgent):
         self._plan_index = -1
         self._plan: list[SubTask] = []
         self._termination_message = termination_message
+        self._move_on_message = move_on_message
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
@@ -200,7 +202,11 @@ class PlannerAgent(LLMAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
-        if "Looks good. Go on to next step." in messages[-1].content:
+        # If the last message is the "move on" message, just move on and avoid a model call
+        print(messages[-1].content)
+        if has_signal_string(
+            messages[-1].content.replace("</feedback>", ""), self._move_on_message
+        ):
             return AgentMessage(
                 role="assistant",
                 content=self._termination_message,
@@ -222,9 +228,9 @@ class PlannerAgent(LLMAgent):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        # print("CONTENT PLANNER", content)
-        # print("*****")
-        if has_termination_condition(content, self._termination_message):
+        print("CONTENT PLANNER", content)
+        print("*****")
+        if has_signal_string(content, self._termination_message):
             return AgentMessage(
                 role="assistant",
                 content=content,

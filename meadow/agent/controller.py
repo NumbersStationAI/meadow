@@ -6,7 +6,7 @@ from meadow.agent.agent import Agent
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.schema import AgentMessage, ToolRunner
 from meadow.agent.user import UserAgent
-from meadow.agent.utils import has_termination_condition, print_message
+from meadow.agent.utils import has_signal_string, print_message
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ class ControllerAgent(Agent):
         # otherwise, send to user.
         # (c) Otherwise, the last message is text. If the last message is from the user, then we should
         #     send to the current task agent. If the last message is from an agent, then we should send to user.
-        if has_termination_condition(messages[-1].content, self._termination_message):
+        if has_signal_string(messages[-1].content, self._termination_message):
             if sender == self._user:
                 return AgentMessage(
                     role="assistant",

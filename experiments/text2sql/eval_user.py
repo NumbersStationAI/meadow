@@ -1,7 +1,7 @@
 from meadow.agent.agent import Agent
 from meadow.agent.schema import AgentMessage
 from meadow.agent.user import UserAgent
-from meadow.agent.utils import has_termination_condition, print_message
+from meadow.agent.utils import has_signal_string, print_message
 
 
 class EvalUserAgent(UserAgent):
@@ -30,7 +30,7 @@ class EvalUserAgent(UserAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply."""
-        if has_termination_condition(messages[-1].content, "<exit>"):
+        if has_signal_string(messages[-1].content, "<exit>"):
             return AgentMessage(
                 role="assistant",
                 content="Goodbye!",
@@ -39,6 +39,6 @@ class EvalUserAgent(UserAgent):
             )
         return AgentMessage(
             role="assistant",
-            content="Looks good. Go on to next step.",
+            content="<next>",
             generating_agent=self.name,
         )

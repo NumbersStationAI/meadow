@@ -28,10 +28,10 @@ def print_message(message: AgentMessage, from_agent: str, to_agent: str) -> None
     print(color + to_print + Style.RESET_ALL)
 
 
-def has_termination_condition(content: str, termination_message: str) -> bool:
-    """Check if the message is the termination message."""
-    return content.strip().endswith(termination_message) or content.strip().startswith(
-        termination_message
+def has_signal_string(content: str, signal_str: str) -> bool:
+    """Check if the message contains signalling string."""
+    return content.strip().endswith(signal_str) or content.strip().startswith(
+        signal_str
     )
 
 

@@ -163,10 +163,18 @@ def generate_sql(
     for i in range(len(agents)):
         agent = agents[i]
         # Hack to get text2sql agent chat
-        t2s = list(agent._planner._available_agents.values())[0]
-        messages = cast(MessageHistory, agent._messages).get_messages(t2s)
+        try:
+            t2s = list(agent._planner._available_agents.values())[0]
+            messages = cast(MessageHistory, agent._messages).get_messages(t2s)
+        except AttributeError:
+            evuse = list(agent._messages.get_all_messages().keys())[0]
+            messages = list(cast(MessageHistory, agent._messages).get_messages(evuse))
         last_sql_message = None
         for msg in messages[::-1]:
+            if isinstance(msg, list):
+                import ipdb
+
+                ipdb.set_trace()
             if "SQL:" in msg.display_content:
                 last_sql_message = msg
                 break
