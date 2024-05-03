@@ -3,6 +3,7 @@
 import logging
 import re
 import xml.etree.ElementTree as ElementTree
+from typing import Callable
 
 from pydantic import BaseModel
 
@@ -10,11 +11,13 @@ from meadow.agent.agent import Agent, LLMAgent
 from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
     generate_llm_reply,
-    has_termination_condition,
+    has_signal_string,
     print_message,
 )
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
+from meadow.database.database import Database
+from meadow.database.serializer import serialize_as_xml
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -32,8 +35,8 @@ DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the use
 ...
 </steps>
 
-Once the user is satisfied with the plan, please output {termination_message} tag instead of a plan.
-
+If the user responds back at some point with a message that indicates the user is satisfied with the plan, please output {termination_message} and nothing else. In other words, only output a plan or {termination_message}.
+{serialized_schema}
 Below are the agents you have access to.
 
 <agents>
@@ -63,7 +66,7 @@ def parse_plan(message: str) -> list[SubTask]:
     </steps>.
     """
     if "<steps>" not in message:
-        raise ValueError("Plan not found in the response.")
+        raise ValueError(f"Plan not found in the response. message={message}")
     inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
     plan: list[SubTask] = []
     try:
@@ -91,23 +94,29 @@ class PlannerAgent(LLMAgent):
         available_agents: list[Agent],
         client: Client,
         llm_config: LLMConfig,
+        database: Database | None,
         system_prompt: str = DEFAULT_PLANNER_PROMPT,
         termination_message: str = "<exit>",
+        move_on_message: str = "<next>",
         overwrite_cache: bool = False,
         silent: bool = True,
+        llm_callback: Callable = None,
     ):
         """Initialize the planner agent."""
         self._available_agents = {a.name: a for a in available_agents}
         self._client = client
         self._llm_config = llm_config
+        self._database = database
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
-        # start at -1 so when we first call move to next task,
+        # start at -1 so when we first call move to next subtask,
         # i.e. start the task, it will be 0
         self._plan_index = -1
         self._plan: list[SubTask] = []
         self._termination_message = termination_message
+        self._move_on_message = move_on_message
         self._overwrite_cache = overwrite_cache
+        self._llm_callback = llm_callback
         self._silent = silent
 
     @property
@@ -128,7 +137,13 @@ class PlannerAgent(LLMAgent):
     @property
     def system_message(self) -> str:
         """Get the system message."""
+        if self._database is not None:
+            serialized_schema = serialize_as_xml(self._database.tables)
+            serialized_schema = f"\nBelow is the data schema the user is working with.\n{serialized_schema}\n"
+        else:
+            serialized_schema = ""
         return self._system_prompt.format(
+            serialized_schema=serialized_schema,
             termination_message=self._termination_message,
             agents="\n".join(
                 [
@@ -148,7 +163,7 @@ class PlannerAgent(LLMAgent):
         """Move to the next agent in the task plan."""
         self._plan_index += 1
         if self._plan_index >= len(self._plan):
-            logger.warning("No more sub-tasks in the plan.")
+            # logger.warning("No more sub-tasks in the plan.")
             return None, None
         sub_task = self._plan[self._plan_index]
         agent = self._available_agents[sub_task.agent]
@@ -197,6 +212,18 @@ class PlannerAgent(LLMAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
+        # If the last message is the "move on" message, just move on and avoid a model call
+        # print(messages[-1].content)
+        if has_signal_string(
+            messages[-1].content.replace("</feedback>", ""), self._move_on_message
+        ):
+            return AgentMessage(
+                role="assistant",
+                content=self._termination_message,
+                tool_calls=None,
+                generating_agent=self.name,
+                is_termination_message=True,
+            )
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -207,12 +234,13 @@ class PlannerAgent(LLMAgent):
                 generating_agent=self.name,
             ),
             llm_config=self._llm_config,
+            llm_callback=self._llm_callback,
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
         # print("CONTENT PLANNER", content)
         # print("*****")
-        if has_termination_condition(content, self._termination_message):
+        if has_signal_string(content, self._termination_message):
             return AgentMessage(
                 role="assistant",
                 content=content,

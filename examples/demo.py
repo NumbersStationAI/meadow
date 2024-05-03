@@ -48,6 +48,7 @@ def run_meadow(api_key: str, duckdb_path: str, instruction: str) -> None:
             max_tokens=500,
             temperature=0.0,
         ),
+        database=database,
         silent=False,
     )
     controller = ControllerAgent(user=user, planner=planner, silent=False)

@@ -36,9 +36,11 @@ class Database:
     def __init__(self, connector: Connector) -> None:
         """Initialize the database."""
         self._connector = connector
-        self._connector.connect()
 
+        self._connector.connect()
         self._base_tables = self._connector.get_tables()
+        self._connector.close()
+
         self._view_tables: list[Table] = []
 
     @property
@@ -55,7 +57,10 @@ class Database:
 
     def run_sql_to_df(self, sql: str) -> pd.DataFrame:
         """Run an SQL query."""
-        return self._connector.run_sql_to_df(sql)
+        self._connector.connect()
+        result = self._connector.run_sql_to_df(sql)
+        self._connector.close()
+        return result
 
     def add_view(self, name: str, sql: str) -> None:
         """Add a view to the database."""
