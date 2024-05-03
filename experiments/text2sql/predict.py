@@ -5,13 +5,10 @@ import datetime
 import json
 import random
 import re
-import shutil
-import tempfile
 from pathlib import Path
 from typing import cast
 
 import click
-import duckdb
 import numpy as np
 from pydantic import BaseModel
 from rich.console import Console
@@ -112,15 +109,6 @@ def generate_sql(
     async_batch_size: int,
 ) -> tuple[list[AgentMessage], list[list[PromptLog]]]:
     """Ask agent to generate SQL."""
-    # Create a temporary folder to store prompt logs
-    # tmp_fld = Path(tempfile.gettempdir()) / "meadow" / "prompt_logs"
-    # if tmp_fld.exists():
-    #     shutil.rmtree(tmp_fld)
-    # tmp_fld.mkdir(parents=True, exist_ok=True)
-    # prompt_log_file = tmp_fld / "prompt_logs.db"
-    # console.print(f"Storing prompt logs in {prompt_log_file}")
-    # all_prompts_db = duckdb.connect(str(prompt_log_file))
-
     # Batch inputs for asyncio
     text_to_sql_in_batches = [
         text_to_sql_in[i : i + async_batch_size]
@@ -135,13 +123,11 @@ def generate_sql(
                 client=client,
                 llm_config=llm_config,
                 overwrite_cache=overwrite_cache,
-                # all_prompts_db=all_prompts_db,
             )
         )
         agents.extend(response_agent_batch)
         all_prompts_list.extend(all_prompts_batch)
 
-    # all_prompts_db.close()
     assert len(agents) == len(all_prompts_list)
     # Extract the sql responses from each agent chat
     sql_responses = []
@@ -156,10 +142,6 @@ def generate_sql(
             messages = list(cast(MessageHistory, agent._messages).get_messages(evuse))
         last_sql_message = None
         for msg in messages[::-1]:
-            if isinstance(msg, list):
-                import ipdb
-
-                ipdb.set_trace()
             if "SQL:" in msg.display_content:
                 last_sql_message = msg
                 break

@@ -118,6 +118,7 @@ def get_simple_text2sql_planner_agent(
         available_agents=[text2sql],
         client=client,
         llm_config=llm_config,
+        database=database,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )

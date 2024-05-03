@@ -16,6 +16,8 @@ from meadow.agent.utils import (
 )
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
+from meadow.database.database import Database
+from meadow.database.serializer import serialize_as_xml
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the use
 </steps>
 
 If the user responds back at some point with a message that indicates the user is satisfied with the plan, please output {termination_message} and nothing else. In other words, only output a plan or {termination_message}.
-
+{serialized_schema}
 Below are the agents you have access to.
 
 <agents>
@@ -92,6 +94,7 @@ class PlannerAgent(LLMAgent):
         available_agents: list[Agent],
         client: Client,
         llm_config: LLMConfig,
+        database: Database | None,
         system_prompt: str = DEFAULT_PLANNER_PROMPT,
         termination_message: str = "<exit>",
         move_on_message: str = "<next>",
@@ -103,6 +106,7 @@ class PlannerAgent(LLMAgent):
         self._available_agents = {a.name: a for a in available_agents}
         self._client = client
         self._llm_config = llm_config
+        self._database = database
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
         # start at -1 so when we first call move to next subtask,
@@ -133,7 +137,13 @@ class PlannerAgent(LLMAgent):
     @property
     def system_message(self) -> str:
         """Get the system message."""
+        if self._database is not None:
+            serialized_schema = serialize_as_xml(self._database.tables)
+            serialized_schema = f"\nBelow is the data schema the user is working with.\n{serialized_schema}\n"
+        else:
+            serialized_schema = ""
         return self._system_prompt.format(
+            serialized_schema=serialized_schema,
             termination_message=self._termination_message,
             agents="\n".join(
                 [

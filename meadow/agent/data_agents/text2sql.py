@@ -21,7 +21,7 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQL_PROMPT = """Given the table schema and user's question, generate a SQLite SQL query that answers it. Use <sql1>, <sql2>, ... tags for the SQL, depending on if previous queries were talked about in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use a (SELECT * FROM sql#) subquery statement with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, simply output {termination_message} tag and nothing else. In other words, either output SQL or {termination_message} tag, but not both.
+DEFAULT_SQL_PROMPT = """Given the table schema and user's question, first think about it step-by-step within <thinking></thinking> tags and then generate a SQLite SQL query that answers it. Use <sql1></sql1>, <sql2></sql2>, ... tags for the SQL, depending on if previous queries were already generated in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use a (SELECT * FROM sql#) subquery statement with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, simply output {termination_message} tag and nothing else. In other words, either output SQL or {termination_message} tag, but not both.
 
 {schema}
 """
