@@ -21,6 +21,7 @@ class ControllerAgent(Agent):
         planner: PlannerAgent,
         tool_executors: list[ToolRunner] = None,
         termination_message: str = "<exit>",
+        move_on_message: str = "<next>",
         silent: bool = True,
     ):
         self._user = user
@@ -29,6 +30,7 @@ class ControllerAgent(Agent):
         self._tool_executors = {t.tool_spec.name: t for t in tool_executors or []}
         self._current_task_agent: Agent = self._planner
         self._termination_message = termination_message
+        self._move_on_message = move_on_message
         self._silent = silent
 
     @property
@@ -83,6 +85,22 @@ class ControllerAgent(Agent):
         else:
             await self.send(reply, self._current_task_agent)
 
+    async def _generate_next_step_reply(self) -> AgentMessage:
+        """Generate a reply to move to the next step in the task plan."""
+        self._current_task_agent, next_message = self._planner.move_to_next_agent()
+        # If the planner has no more steps, then we should terminate the conversation
+        if self._current_task_agent is None:
+            return AgentMessage(
+                role="assistant",
+                content=self._termination_message,
+                generating_agent=self.name,
+                need_user_feedback=True,
+                is_termination_message=True,
+            )
+        return AgentMessage(
+            role="assistant", content=next_message, generating_agent=self.name
+        )
+
     # TODO: move this into a validator agent that runs and error messages with other agents
     async def generate_tool_call_reply(
         self,
@@ -117,9 +135,11 @@ class ControllerAgent(Agent):
         #     (i) If the last message is from the user, then we should terminate the conversation
         #     (ii) If the last message is from an agent, then we should move on to next step in task
         #          plan and send to that agent.
-        # (b) If the last message is a tool call, run the tool call. If error, send back to agent.
+        # (b) If the last message is a DSL "next" message
+        #     (i) The last message must be from the user, then we should move on to the next step in the task plan
+        # (c) If the last message is a tool call, run the tool call. If error, send back to agent.
         # otherwise, send to user.
-        # (c) Otherwise, the last message is text. If the last message is from the user, then we should
+        # (d) Otherwise, the last message is text. If the last message is from the user, then we should
         #     send to the current task agent. If the last message is from an agent, then we should send to user.
         if has_signal_string(messages[-1].content, self._termination_message):
             if sender == self._user:
@@ -131,21 +151,10 @@ class ControllerAgent(Agent):
                     is_termination_message=True,
                 )
             else:
-                self._current_task_agent, next_message = (
-                    self._planner.move_to_next_agent()
-                )
-                # If the planner has no more steps, then we should terminate the conversation
-                if self._current_task_agent is None:
-                    return AgentMessage(
-                        role="assistant",
-                        content=self._termination_message,
-                        generating_agent=self.name,
-                        need_user_feedback=True,
-                        is_termination_message=True,
-                    )
-                return AgentMessage(
-                    role="assistant", content=next_message, generating_agent=self.name
-                )
+                return await self._generate_next_step_reply()
+        elif has_signal_string(messages[-1].content, self._move_on_message):
+            assert sender == self._user, "Only user can send move on message."
+            return await self._generate_next_step_reply()
         elif messages[-1].tool_calls:
             return await self.generate_tool_call_reply(messages[-1])
         else:
