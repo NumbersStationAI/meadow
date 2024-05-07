@@ -10,6 +10,26 @@ from meadow.client.schema import ChatResponse, LLMConfig, ToolSpec
 lgger = logging.getLogger(__name__)
 
 
+class Commands:
+    NEXT = "<next>"
+    END = "<end>"
+
+    @staticmethod
+    def _has_signal_string(content: str, signal_str: str) -> bool:
+        """Check if the message contains signalling string."""
+        return content.strip().endswith(signal_str) or content.strip().startswith(
+            signal_str
+        )
+
+    @staticmethod
+    def has_next(content: str) -> bool:
+        return Commands._has_signal_string(content, Commands.NEXT)
+
+    @staticmethod
+    def has_end(content: str) -> bool:
+        return Commands._has_signal_string(content, Commands.END)
+
+
 def print_message(message: AgentMessage, from_agent: str, to_agent: str) -> None:
     """Print a message with color based on the agent."""
     if to_agent == "User":
@@ -26,13 +46,6 @@ def print_message(message: AgentMessage, from_agent: str, to_agent: str) -> None
         color = Fore.GREEN
     to_print = f"{from_agent} -> {to_agent}: {content}"
     print(color + to_print + Style.RESET_ALL)
-
-
-def has_signal_string(content: str, signal_str: str) -> bool:
-    """Check if the message contains signalling string."""
-    return content.strip().endswith(signal_str) or content.strip().startswith(
-        signal_str
-    )
 
 
 async def generate_llm_reply(

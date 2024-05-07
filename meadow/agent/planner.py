@@ -1,6 +1,7 @@
 """Planner agent."""
 
 import logging
+from queue import Queue
 import re
 import xml.etree.ElementTree as ElementTree
 from typing import Callable
@@ -11,7 +12,6 @@ from meadow.agent.agent import Agent, LLMAgent
 from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
     generate_llm_reply,
-    has_signal_string,
     print_message,
 )
 from meadow.client.client import Client
@@ -45,15 +45,18 @@ Below are the agents you have access to.
 """
 
 
-class SubTask(BaseModel):
+class SubTask:
     """Sub-task in a plan."""
 
-    index: int
-    agent: str
+    agent: Agent
     prompt: str
 
+    def __init__(self, agent: Agent, prompt: str):
+        self.agent = agent
+        self.prompt = prompt
 
-def parse_plan(message: str) -> list[SubTask]:
+
+def parse_plan(message: str, available_agents: dict[str, Agent]) -> list[SubTask]:
     """Extract the plan from the response.
 
     Plan follows
@@ -72,15 +75,15 @@ def parse_plan(message: str) -> list[SubTask]:
     try:
         root = ElementTree.fromstring(inner_steps)  # Parse the XML string
         for step in root:
-            agent = (
+            agent = available_agents[
                 step.find("agent").text if step.find("agent") is not None else "Unknown"
-            )
+            ]
             instruction = (
                 step.find("instruction").text.strip()
                 if step.find("instruction") is not None
                 else "No instruction"
             )
-            plan.append(SubTask(index=len(plan), agent=agent, prompt=instruction))
+            plan.append(SubTask(agent=agent, prompt=instruction))
     except ElementTree.ParseError:
         logger.error(f"Failed to parse the message as XML. message={message}")
     return plan
@@ -111,8 +114,7 @@ class PlannerAgent(LLMAgent):
         self._messages = MessageHistory()
         # start at -1 so when we first call move to next subtask,
         # i.e. start the task, it will be 0
-        self._plan_index = -1
-        self._plan: list[SubTask] = []
+        self._plan: list[SubTask] = Queue()
         self._termination_message = termination_message
         self._move_on_message = move_on_message
         self._overwrite_cache = overwrite_cache
@@ -155,19 +157,15 @@ class PlannerAgent(LLMAgent):
 
     def has_plan(self) -> bool:
         """Check if the agent has a plan."""
-        return bool(self._plan)
+        return not self._plan.empty()
 
-    def move_to_next_agent(
+    def get_next_task(
         self,
-    ) -> tuple[Agent | None, str | None]:
+    ) -> SubTask:
         """Move to the next agent in the task plan."""
-        self._plan_index += 1
-        if self._plan_index >= len(self._plan):
-            # logger.warning("No more sub-tasks in the plan.")
-            return None, None
-        sub_task = self._plan[self._plan_index]
-        agent = self._available_agents[sub_task.agent]
-        return agent, sub_task.prompt
+        if self._plan.empty():
+            return None
+        return self._plan.get()
 
     async def send(
         self,
@@ -212,18 +210,6 @@ class PlannerAgent(LLMAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
-        # If the last message is the "move on" message, just move on and avoid a model call
-        # print(messages[-1].content)
-        if has_signal_string(
-            messages[-1].content.replace("</feedback>", ""), self._move_on_message
-        ):
-            return AgentMessage(
-                role="assistant",
-                content=self._termination_message,
-                tool_calls=None,
-                generating_agent=self.name,
-                is_termination_message=True,
-            )
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -238,22 +224,11 @@ class PlannerAgent(LLMAgent):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        # print("CONTENT PLANNER", content)
-        # print("*****")
-        if has_signal_string(content, self._termination_message):
-            return AgentMessage(
-                role="assistant",
-                content=content,
-                tool_calls=None,
-                generating_agent=self.name,
-                is_termination_message=True,
-            )
-        else:
-            # TODO: reask to fix errors
-            self._plan = parse_plan(content)
-            return AgentMessage(
-                role="assistant",
-                content=content,
-                tool_calls=None,
-                generating_agent=self.name,
-            )
+
+        [self._plan.put(i) for i in parse_plan(content, self._available_agents)]
+        return AgentMessage(
+            role="assistant",
+            content=content,
+            tool_calls=None,
+            generating_agent=self.name,
+        )
