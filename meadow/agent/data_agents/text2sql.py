@@ -78,7 +78,6 @@ class SQLGeneratorAgent(DataAgent):
         database: Database,
         system_prompt: str = DEFAULT_SQL_PROMPT,
         termination_message: str = "<exit>",
-        move_on_message: str = "<next>",
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -89,7 +88,6 @@ class SQLGeneratorAgent(DataAgent):
         self._database = database
         self._system_prompt = system_prompt
         self._termination_message = termination_message
-        self._move_on_message = move_on_message
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
@@ -160,15 +158,6 @@ class SQLGeneratorAgent(DataAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
-        # If the last message is the "move on" message, just move on and avoid a model call
-        if has_signal_string(messages[-1].content, self._move_on_message):
-            return AgentMessage(
-                role="assistant",
-                content=self._termination_message,
-                tool_calls=None,
-                generating_agent=self.name,
-                is_termination_message=True,
-            )
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
