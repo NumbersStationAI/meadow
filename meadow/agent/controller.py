@@ -3,6 +3,7 @@
 import logging
 
 from meadow.agent.agent import Agent
+from meadow.agent.executor import ExecutorAgent
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.schema import AgentMessage, ToolRunner
 from meadow.agent.user import UserAgent
@@ -28,6 +29,11 @@ class ControllerAgent(Agent):
         self._planner = planner
         self._messages = MessageHistory()
         self._tool_executors = {t.tool_spec.name: t for t in tool_executors or []}
+        self._agent_executors: dict[Agent, list[ExecutorAgent]] = {
+            agent: agent.executors
+            for agent in planner._available_agents.values()
+            if agent.executors
+        }
         self._current_task_agent: Agent = self._planner
         self._termination_message = termination_message
         self._move_on_message = move_on_message
@@ -75,17 +81,14 @@ class ControllerAgent(Agent):
         if self._current_task_agent != self._planner:
             assert self._planner.has_plan()
 
-        reply = await self.generate_reply(
+        reply, to_send = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
         )
-        if reply.need_user_feedback:
-            if reply.is_termination_message:
-                return
-            await self.send(reply, self._user)
-        else:
-            await self.send(reply, self._current_task_agent)
+        if reply.is_termination_message:
+            return
+        await self.send(reply, to_send)
 
-    async def _generate_next_step_reply(self) -> AgentMessage:
+    async def _generate_next_step_reply(self) -> tuple[AgentMessage, "Agent"]:
         """Generate a reply to move to the next step in the task plan."""
         self._current_task_agent, next_message = self._planner.move_to_next_agent()
         # If the planner has no more steps, then we should terminate the conversation
@@ -94,41 +97,45 @@ class ControllerAgent(Agent):
                 role="assistant",
                 content=self._termination_message,
                 generating_agent=self.name,
-                need_user_feedback=True,
                 is_termination_message=True,
-            )
+            ), self._user
         return AgentMessage(
             role="assistant", content=next_message, generating_agent=self.name
-        )
+        ), self._current_task_agent
 
-    # TODO: move this into a validator agent that runs and error messages with other agents
-    async def generate_tool_call_reply(
-        self,
-        message: AgentMessage,
-    ) -> AgentMessage:
-        """Generate a reply based on the tool call."""
-        assert message.tool_calls
-        assert len(message.tool_calls) == 1, "Only one tool call is supported."
-        tool_call = message.tool_calls[0]
-        tool_executor = self._tool_executors[tool_call.name]
-        try:
-            tool_call_response = tool_executor.run(tool_call)
-            for_user = True
-        except Exception as e:
-            tool_call_response = f"Error running {tool_call.name}:\n{e}"
-            for_user = False
-        return AgentMessage(
+    async def _generate_executed_reply(
+        self, messages: list[AgentMessage], sender: Agent
+    ) -> tuple[AgentMessage, "Agent"]:
+        """Generate a reply after validation.
+
+        If the validation is never an error, return the last executor response which could do some
+        parsing of the output.
+
+        Otherwise, return the first error message.
+        """
+        executor_response = None
+        default_response = AgentMessage(
             role="assistant",
-            content=tool_call_response,
-            need_user_feedback=for_user,
+            content=messages[-1].content,
+            display_content=messages[-1].display_content,
             generating_agent=self.name,
+        )
+        for executor in self._agent_executors.get(sender, []):
+            executor_response, _ = await executor.generate_reply(messages, sender)
+            if executor_response.is_error_message:
+                return executor_response, sender
+        # We know that executor_response is not an error message
+        final_response = executor_response or default_response
+        return (
+            final_response,
+            self._user if sender != self._user else self._current_task_agent,
         )
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> AgentMessage:
+    ) -> tuple[AgentMessage, "Agent"]:
         """Generate a reply based on the received messages."""
         # We iterate over options to determine how to generate a reply
         # (a) If the last message is a termination message
@@ -147,24 +154,15 @@ class ControllerAgent(Agent):
                     role="assistant",
                     content=self._termination_message,
                     generating_agent=self.name,
-                    need_user_feedback=True,
                     is_termination_message=True,
-                )
+                ), self._user
             else:
                 return await self._generate_next_step_reply()
         elif has_signal_string(messages[-1].content, self._move_on_message):
             assert sender == self._user, "Only user can send move on message."
             return await self._generate_next_step_reply()
-        elif messages[-1].tool_calls:
-            return await self.generate_tool_call_reply(messages[-1])
         else:
-            return AgentMessage(
-                role="assistant",
-                content=messages[-1].content,
-                display_content=messages[-1].display_content,
-                generating_agent=self.name,
-                need_user_feedback=(sender != self._user),
-            )
+            return await self._generate_executed_reply(messages, sender)
 
     async def initiate_chat(
         self,

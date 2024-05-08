@@ -17,7 +17,9 @@ from tqdm import tqdm
 from experiments.text2sql.agent_factory import (
     PromptLog,
     get_simple_text2sql_agent,
-    get_simple_text2sql_planner_agent,
+    get_text2sql_llm_reask_agent,
+    get_text2sql_planner_agent,
+    get_text2sql_simple_reask_agent,
 )
 from experiments.text2sql.eval_user import EvalUserAgent
 from experiments.text2sql.utils import load_data, read_tables_json
@@ -25,6 +27,7 @@ from meadow.agent.agent import Agent
 from meadow.agent.schema import AgentMessage
 from meadow.cache.duckdb import DuckDBCache
 from meadow.client.api.anthropic import AnthropicClient
+from meadow.client.api.openai import OpenAIClient
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.connector.connector import Table
@@ -79,7 +82,27 @@ async def agenerate_sql(
                 example_idx=i,
             )
         elif text_to_sql.agent_type == "text2sql_with_plan":
-            agent = get_simple_text2sql_planner_agent(
+            agent = get_text2sql_planner_agent(
+                user_agent=user_agent,
+                client=client,
+                llm_config=llm_config,
+                database=database,
+                overwrite_cache=overwrite_cache,
+                all_prompts_to_save=all_prompts_to_save,
+                example_idx=i,
+            )
+        elif text_to_sql.agent_type == "text2sql_with_simple_reask":
+            agent = get_text2sql_simple_reask_agent(
+                user_agent=user_agent,
+                client=client,
+                llm_config=llm_config,
+                database=database,
+                overwrite_cache=overwrite_cache,
+                all_prompts_to_save=all_prompts_to_save,
+                example_idx=i,
+            )
+        elif text_to_sql.agent_type == "text2sql_with_llm_reask":
+            agent = get_text2sql_llm_reask_agent(
                 user_agent=user_agent,
                 client=client,
                 llm_config=llm_config,
@@ -203,6 +226,7 @@ def cli() -> None:
 @click.option("--max-tokens", type=int, default=1000)
 @click.option("--temperature", type=float, default=0)
 # Client options
+@click.option("--api-provider", type=str, default="anthropic")
 @click.option("--model", type=str, default="claude-3-opus-20240229")
 @click.option(
     "--client-cache-path",
@@ -224,6 +248,7 @@ def predict(
     agent_type: str,
     max_tokens: int,
     temperature: float,
+    api_provider: str,
     model: str,
     client_cache_path: str,
     api_key: str,
@@ -241,9 +266,15 @@ def predict(
         max_tokens=max_tokens,
     )
     cache = DuckDBCache(client_cache_path)
+    if api_provider == "anthropic":
+        api_client = AnthropicClient(api_key=api_key)
+    elif api_provider == "openai":
+        api_client = OpenAIClient(api_key=api_key)
+    else:
+        raise ValueError(f"Unknown api provider {api_provider}")
     client = Client(
         cache=cache,
-        api_client=AnthropicClient(api_key=api_key),
+        api_client=api_client,
         model=model,
     )
 

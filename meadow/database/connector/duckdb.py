@@ -15,6 +15,7 @@ class DuckDBConnector(Connector):
         if not Path(self.db_path).exists():
             raise FileNotFoundError(f"Database file {self.db_path} does not exist.")
         self.conn: duckdb.DuckDBPyConnection = None
+        self.cur: duckdb.DuckDBPyConnection = None
 
     @property
     def dialect(self) -> str:
@@ -24,6 +25,7 @@ class DuckDBConnector(Connector):
     def connect(self) -> None:
         """Connect to the database."""
         self.conn = duckdb.connect(self.db_path)
+        self.cur = self.conn.cursor()
 
     def close(self) -> None:
         """Close the connection to the database."""
@@ -32,11 +34,14 @@ class DuckDBConnector(Connector):
 
     def commit(self) -> None:
         """Commit changes to the database."""
-        self.conn.commit()
+        if self.cur:
+            self.cur.commit()
 
     def run_sql_to_df(self, sql: str) -> pd.DataFrame:
         """Run an SQL query."""
-        return self.conn.sql(sql).df()
+        if not self.cur:
+            raise ValueError("Must connect to database before running SQL.")
+        return self.cur.sql(sql).df()
 
     def get_tables(self) -> list[Table]:
         """Get the tables in the database."""

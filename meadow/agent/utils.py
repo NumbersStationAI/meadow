@@ -1,13 +1,35 @@
 import logging
+from functools import wraps
 from typing import Callable
 
-from colorama import Fore, Style
+from termcolor import colored
 
+from meadow.agent.agent import Agent
 from meadow.agent.schema import AgentMessage
 from meadow.client.client import Client
 from meadow.client.schema import ChatResponse, LLMConfig, ToolSpec
 
 lgger = logging.getLogger(__name__)
+
+COLOR_MAP = {
+    "User": "yellow",
+    "Controller": "blue",
+    "Planner": "red",
+}
+
+AVAILABLE_COLORS = [
+    "green",
+    "magenta",
+    "cyan",
+    "light_grey",
+    "dark_grey",
+    "light_red",
+    "light_green",
+    "light_yellow",
+    "light_blue",
+    "light_magenta",
+    "light_cyan",
+]
 
 
 def print_message(message: AgentMessage, from_agent: str, to_agent: str) -> None:
@@ -16,16 +38,14 @@ def print_message(message: AgentMessage, from_agent: str, to_agent: str) -> None
         content = message.display_content
     else:
         content = message.content
-    if from_agent == "User":
-        color = Fore.YELLOW
-    elif from_agent == "Controller":
-        color = Fore.BLUE
-    elif from_agent == "Planner":
-        color = Fore.RED
+    if from_agent in COLOR_MAP:
+        color = COLOR_MAP[from_agent]
     else:
-        color = Fore.GREEN
+        # Add a default color
+        color = AVAILABLE_COLORS.pop(0)
+        COLOR_MAP[from_agent] = color
     to_print = f"{from_agent} -> {to_agent}: {content}"
-    print(color + to_print + Style.RESET_ALL)
+    print(colored(to_print, color))
 
 
 def has_signal_string(content: str, signal_str: str) -> bool:
@@ -53,7 +73,7 @@ async def generate_llm_reply(
     # print("*********")
     chat_response = await client.chat(
         messages=serialized_messages,
-        tools=tools,
+        tools=tools if tools else None,
         model=model,
         seed=llm_config.seed,
         temperature=llm_config.temperature,

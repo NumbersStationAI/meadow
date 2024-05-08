@@ -199,47 +199,64 @@ class PlannerAgent(LLMAgent):
             message.content = f"<feedback>{message.content}</feedback>"
         self._messages.add_message(agent=sender, role="user", message=message)
 
-        reply = await self.generate_reply(
+        reply, to_send = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
         )
-        await self.send(reply, sender)
+        await self.send(reply, to_send)
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> AgentMessage:
+    ) -> tuple[AgentMessage, "Agent"]:
         """Generate a reply based on the received messages."""
-        chat_response = await generate_llm_reply(
-            client=self.llm_client,
-            messages=messages,
-            tools=[],
-            system_message=AgentMessage(
-                role="system",
-                content=self.system_message,
-                generating_agent=self.name,
-            ),
-            llm_config=self._llm_config,
-            llm_callback=self._llm_callback,
-            overwrite_cache=self._overwrite_cache,
-        )
-        content = chat_response.choices[0].message.content
-        # print("CONTENT PLANNER", content)
-        # print("*****")
-        if has_signal_string(content, self._termination_message):
-            return AgentMessage(
-                role="assistant",
-                content=content,
-                tool_calls=None,
-                generating_agent=self.name,
-                is_termination_message=True,
+        if self.llm_client is not None:
+            chat_response = await generate_llm_reply(
+                client=self.llm_client,
+                messages=messages,
+                tools=[],
+                system_message=AgentMessage(
+                    role="system",
+                    content=self.system_message,
+                    generating_agent=self.name,
+                ),
+                llm_config=self._llm_config,
+                llm_callback=self._llm_callback,
+                overwrite_cache=self._overwrite_cache,
             )
+            content = chat_response.choices[0].message.content
+            # print("CONTENT PLANNER", content)
+            # print("*****")
+            if has_signal_string(content, self._termination_message):
+                return AgentMessage(
+                    role="assistant",
+                    content=content,
+                    tool_calls=None,
+                    generating_agent=self.name,
+                    is_termination_message=True,
+                ), sender
+            else:
+                # TODO: reask to fix errors
+                self._plan = parse_plan(content)
+                return AgentMessage(
+                    role="assistant",
+                    content=content,
+                    tool_calls=None,
+                    generating_agent=self.name,
+                ), sender
         else:
-            # TODO: reask to fix errors
-            self._plan = parse_plan(content)
+            if len(self._available_agents) > 1:
+                raise ValueError("No LLM client provided and more than one agent.")
+            agent = list(self._available_agents.values())[0]
+            raw_content = (
+                messages[-1]
+                .content.replace("<objective>", "")
+                .replace("</objective>", "")
+            )
+            self._plan = [SubTask(index=0, agent=agent.name, prompt=raw_content)]
             return AgentMessage(
                 role="assistant",
-                content=content,
+                content=f"Generated no plan and just using {agent.name}",
                 tool_calls=None,
                 generating_agent=self.name,
-            )
+            ), sender
