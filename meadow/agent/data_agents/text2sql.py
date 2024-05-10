@@ -7,6 +7,7 @@ from typing import Callable
 import sqlglot
 
 from meadow.agent.agent import Agent, DataAgent
+from meadow.agent.executor import DefaultExecutorAgent, ExecutorAgent
 from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
     generate_llm_reply,
@@ -21,7 +22,7 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQL_PROMPT = """Given the table schema and user's question, first think about it step-by-step within <thinking></thinking> tags and then generate a SQLite SQL query that answers it. Use <sql1></sql1>, <sql2></sql2>, ... tags for the SQL, depending on if previous queries were already generated in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use a (SELECT * FROM sql#) subquery statement with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, simply output {termination_message} tag and nothing else. In other words, either output SQL or {termination_message} tag, but not both.
+DEFAULT_SQL_PROMPT = """Given the table schema and user's question, first think about it step-by-step within <thinking></thinking> tags and then generate a SQLite SQL query that answers it. Use <sql1></sql1>, <sql2></sql2>, ... tags for the SQL, depending on if previous queries were already generated in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use sql# to represent that view with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, simply output {termination_message} tag and nothing else. In other words, either output SQL or {termination_message} tag, but not both.
 
 {schema}
 """
@@ -57,7 +58,7 @@ def parse_sqls(message: str) -> dict[str, str]:
     # this will return a list of tuples where the tuples are the groups
     sql_components = re.findall(r"(<sql\d+>(.*?)<\/sql\d+>)", message, re.DOTALL)
     if not sql_components:
-        raise ValueError("SQL not found in the response.")
+        raise ValueError(f"SQL not found in the response. message={message}")
     sql_dict = {}
     for sql_pair in sql_components:
         sql_with_tag, sql = sql_pair
@@ -68,6 +69,83 @@ def parse_sqls(message: str) -> dict[str, str]:
     return sql_dict
 
 
+def parse_sql_response(
+    content: str, agent_name: str, termination_message: str, database: Database
+) -> AgentMessage:
+    """Generate a parsed response from the SQL query."""
+    try:
+        sql_dict = parse_sqls(content)
+    except Exception as e:
+        error_message = f"Failed to parse SQL in response. e={e}"
+        logger.warning(error_message)
+        raise ValueError(error_message)
+    any_new_table = any(database.get_table(k) is None for k in sql_dict.keys())
+    if has_signal_string(content, termination_message) and not any_new_table:
+        return AgentMessage(
+            role="assistant",
+            content=content,
+            tool_calls=None,
+            generating_agent=agent_name,
+            is_termination_message=True,
+        )
+    else:
+        try:
+            # update history with new SQL
+            added_views = set()
+            error_message = None
+            largest_k = max(sql_dict.keys(), key=lambda x: int(x[3:]))
+            for k, v in sql_dict.items():
+                view_table = database.get_table(k)
+                # If there is a new definition, then it's likely a reask and we should
+                # update
+                if view_table is not None and v == view_table.view_sql:
+                    continue
+                else:
+                    v = replace_tag_with_table(v)
+                    v = database.normalize_query(v)
+                    try:
+                        database.add_view(name=k, sql=v)
+                        added_views.add(k)
+                    except Exception as e:
+                        error_message = f"Failed to add view to database. e={e}"
+                        logger.warning(error_message)
+                        return  # used to break out of try/except
+            try:
+                # get the last sql and return it fully parsed
+                last_sql = prettify_sql(database.get_table(largest_k).view_sql)
+            except Exception as e:
+                error_message = f"Failed to get last SQL from database. e={e}"
+                logger.warning(error_message)
+                return  # used to break out of try/except
+            try:
+                last_sql_df = database.run_sql_to_df(last_sql).head(5)
+            except Exception as e:
+                error_message = f"Failed to run SQL in DuckDB. e={e}"
+                logger.warning(error_message)
+                return  # used to break out of try/except
+            # TODO: add error to check if DF is empty or not
+        except Exception as e:
+            error_message = f"Failed to get last SQL from database. e={e}"
+            logger.warning(error_message)
+            return  # used to break out of try/except
+        finally:
+            if error_message:
+                # Clean up possibly buggy views
+                for k in added_views:
+                    database.remove_view(k)
+                raise ValueError(error_message)
+        user_content = f"SQL:\n{last_sql}"
+        if last_sql_df is not None:
+            user_content += f"\n\nTable:\n{last_sql_df.to_string()}"
+        return AgentMessage(
+            role="assistant",
+            content=content,
+            display_content=user_content,
+            tool_calls=None,
+            generating_agent=agent_name,
+        )
+
+
 class SQLGeneratorAgent(DataAgent):
     """Agent that generates SQL queries from user questions."""
 
@@ -76,6 +154,7 @@ class SQLGeneratorAgent(DataAgent):
         client: Client,
         llm_config: LLMConfig,
         database: Database,
+        executors: list[ExecutorAgent] = None,
         system_prompt: str = DEFAULT_SQL_PROMPT,
         termination_message: str = "<exit>",
         overwrite_cache: bool = False,
@@ -86,12 +165,24 @@ class SQLGeneratorAgent(DataAgent):
         self._client = client
         self._llm_config = llm_config
         self._database = database
+        self._executors = executors
         self._system_prompt = system_prompt
         self._termination_message = termination_message
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
         self._messages = MessageHistory()
+
+        # Override with defaults
+        if self._executors is None:
+            self._executors = [
+                DefaultExecutorAgent(
+                    client=self._client,
+                    llm_config=self._llm_config,
+                    database=self._database,
+                    execution_func=parse_sql_response,
+                )
+            ]
 
     @property
     def name(self) -> str:
@@ -121,6 +212,11 @@ class SQLGeneratorAgent(DataAgent):
             schema=serialized_schema, termination_message=self._termination_message
         )
 
+    @property
+    def executors(self) -> list[ExecutorAgent] | None:
+        """The executor agents that should be used by this agent."""
+        return self._executors
+
     async def send(
         self,
         message: AgentMessage,
@@ -147,16 +243,16 @@ class SQLGeneratorAgent(DataAgent):
             )
         self._messages.add_message(agent=sender, role="user", message=message)
 
-        reply = await self.generate_reply(
+        reply, to_send = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
         )
-        await self.send(reply, sender)
+        await self.send(reply, to_send)
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> AgentMessage:
+    ) -> tuple[AgentMessage, "Agent"]:
         """Generate a reply based on the received messages."""
         chat_response = await generate_llm_reply(
             client=self.llm_client,
@@ -174,58 +270,9 @@ class SQLGeneratorAgent(DataAgent):
         content = chat_response.choices[0].message.content
         # print("SQL AGENT CONTENT", content)
         # print("*****")
-        sql_dict = parse_sqls(content)
-        any_new_table = any(self.database.get_table(k) is None for k in sql_dict.keys())
-        if has_signal_string(content, self._termination_message) and not any_new_table:
-            return AgentMessage(
-                role="assistant",
-                content=content,
-                tool_calls=None,
-                generating_agent=self.name,
-                is_termination_message=True,
-            )
-        else:
-            try:
-                # update history with new SQL
-                largest_k = max(sql_dict.keys(), key=lambda x: int(x[3:]))
-                for k, v in sql_dict.items():
-                    if view_table := self.database.get_table(k):
-                        if v != view_table.view_sql:
-                            print("BAD", k, "\n", view_table.view_sql, "*****\n", v)
-                        continue
-                    else:
-                        v = replace_tag_with_table(v)
-                        v = self.database.normalize_query(v)
-                        # TODO: add reask
-                        try:
-                            self.database.add_view(name=k, sql=v)
-                        except Exception as e:
-                            logger.warning(f"Failed to add view to database. e={e}")
-                            pass
-                try:
-                    # get the last sql and return it fully parsed
-                    last_sql = prettify_sql(self.database.get_table(largest_k).view_sql)
-                except Exception as e:
-                    logger.warning(f"Failed to get last SQL from database. e={e}")
-                    last_sql = ""
-                try:
-                    last_sql_df = self.database.run_sql_to_df(last_sql).head(5)
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to run SQL in DuckDB. sql={last_sql}, e={e}"
-                    )
-                    last_sql_df = None
-            except Exception as e:
-                logger.warning(f"Failed to parse SQL in response. e={e}")
-                last_sql = ""
-                last_sql_df = None
-            user_content = f"SQL:\n{last_sql}"
-            if last_sql_df is not None:
-                user_content += f"\n\nTable:\n{last_sql_df.to_string()}"
-            return AgentMessage(
-                role="assistant",
-                content=content,
-                display_content=user_content,
-                tool_calls=None,
-                generating_agent=self.name,
-            )
+        return AgentMessage(
+            role="assistant",
+            content=content,
+            tool_calls=None,
+            generating_agent=self.name,
+        ), sender

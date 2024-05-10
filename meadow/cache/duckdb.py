@@ -12,7 +12,8 @@ class DuckDBCache(Cache):
         """Create DuckDB cache."""
         self.cache_file = cache_file if cache_file else ".duckdb.cache"
         self.conn = duckdb.connect(self.cache_file)
-        self.conn.execute("""
+        self.cur = self.conn.cursor()
+        self.cur.execute("""
             CREATE TABLE IF NOT EXISTS cache (
                 key VARCHAR PRIMARY KEY,
                 value VARCHAR
@@ -32,7 +33,7 @@ class DuckDBCache(Cache):
         Args:
             key: Key for cache.
         """
-        result = self.conn.execute(
+        result = self.cur.execute(
             "SELECT value FROM cache WHERE key = ?", (key,)
         ).fetchone()
         return result[0] if result else None
@@ -47,7 +48,8 @@ class DuckDBCache(Cache):
             key: Key for cache.
             value: New value for key.
         """
-        self.conn.execute(
+        self.cur.begin()
+        self.cur.execute(
             "INSERT INTO cache (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value",
             (key, value),
         )
@@ -60,9 +62,9 @@ class DuckDBCache(Cache):
         Returns:
             List of keys in cache.
         """
-        result = self.conn.execute("SELECT key FROM cache").fetchall()
+        result = self.cur.execute("SELECT key FROM cache").fetchall()
         return [row[0] for row in result]
 
     def commit(self) -> None:
         """Commit any changes to the database."""
-        self.conn.commit()
+        self.cur.commit()

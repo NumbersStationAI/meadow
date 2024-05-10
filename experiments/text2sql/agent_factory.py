@@ -4,7 +4,8 @@ from pydantic import BaseModel
 
 from meadow.agent.agent import Agent
 from meadow.agent.controller import ControllerAgent
-from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
+from meadow.agent.data_agents.text2sql import SQLGeneratorAgent, parse_sql_response
+from meadow.agent.executor import DefaultExecutorAgent, ExecutorAgent
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
 from meadow.client.client import Client
@@ -75,24 +76,31 @@ def get_simple_text2sql_agent(
         "SQLGeneratorAgent",
         all_prompts_to_save,
     )
-    # prompt_callback = PromptCallback("SQLGeneratorAgent", example_idx, all_prompts_db)
-    agent = SQLGeneratorAgent(
+    text2sql = SQLGeneratorAgent(
         client=client,
         llm_config=llm_config,
         database=database,
+        executors=[],
         overwrite_cache=overwrite_cache,
         llm_callback=callback,
     )
-    return agent
+    planner = PlannerAgent(
+        available_agents=[text2sql],
+        client=None,
+        llm_config=llm_config,
+        database=database,
+        overwrite_cache=overwrite_cache,
+    )
+    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    return controller
 
 
-def get_simple_text2sql_planner_agent(
+def get_text2sql_planner_agent(
     user_agent: UserAgent,
     client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
-    # all_prompts_db: Path,
     all_prompts_to_save: list,
     example_idx: int,
 ) -> Agent:
@@ -111,6 +119,7 @@ def get_simple_text2sql_planner_agent(
         client=client,
         llm_config=llm_config,
         database=database,
+        executors=[],
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -121,6 +130,102 @@ def get_simple_text2sql_planner_agent(
         database=database,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
+    )
+    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    return controller
+
+
+def get_text2sql_simple_reask_agent(
+    user_agent: UserAgent,
+    client: Client,
+    llm_config: LLMConfig,
+    database: Database,
+    overwrite_cache: bool,
+    all_prompts_to_save: list,
+    example_idx: int,
+) -> Agent:
+    """Get a simple text2sql agent."""
+    callback_sql = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "SQLGeneratorAgent",
+        all_prompts_to_save,
+    )
+    # Have to build custom executor that doesn't use LLM
+    no_llm_executor = [
+        DefaultExecutorAgent(
+            client=None,
+            llm_config=None,
+            database=database,
+            execution_func=parse_sql_response,
+        )
+    ]
+    text2sql = SQLGeneratorAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        executors=no_llm_executor,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_sql,
+    )
+    planner = PlannerAgent(
+        available_agents=[text2sql],
+        client=None,
+        llm_config=llm_config,
+        database=database,
+        overwrite_cache=overwrite_cache,
+    )
+    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    return controller
+
+
+def get_text2sql_llm_reask_agent(
+    user_agent: UserAgent,
+    client: Client,
+    llm_config: LLMConfig,
+    database: Database,
+    overwrite_cache: bool,
+    all_prompts_to_save: list,
+    example_idx: int,
+) -> Agent:
+    """Get a simple text2sql agent."""
+    callback_sql = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "SQLGeneratorAgent",
+        all_prompts_to_save,
+    )
+    callback_validator = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "ValidatorAgent",
+        all_prompts_to_save,
+    )
+    # Validator has client now to run llm
+    validator = ExecutorAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_validator,
+    )
+    text2sql = SQLGeneratorAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        validator=validator,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_sql,
+    )
+    planner = PlannerAgent(
+        available_agents=[text2sql],
+        client=None,
+        llm_config=llm_config,
+        database=database,
+        overwrite_cache=overwrite_cache,
     )
     controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
     return controller

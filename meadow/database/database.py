@@ -23,9 +23,14 @@ def replace_view_select_star_with_def(
 ) -> str:
     """Replace SELECT * FROM <view_name> with the view definition."""
     for view_name, view_sql in view_sql_pairs:
-        sql = sql.replace(
-            f"(SELECT * FROM {view_name})", f"({view_sql}) AS {view_name}"
-        )
+        if view_name not in sql:
+            continue
+        if f"(SELECT * FROM {view_name})" in sql:
+            sql = sql.replace(
+                f"(SELECT * FROM {view_name})", f"({view_sql}) AS {view_name}"
+            )
+        else:
+            sql = sql.replace(f"{view_name}", f"({view_sql}) AS {view_name}")
     return sql
 
 
@@ -70,6 +75,10 @@ class Database:
                 f"Invalid SQL sql={sql}, dialect={self._connector.dialect}, error={error}"
             )
         self._view_tables.append(Table(name=name, is_view=True, view_sql=sql))
+
+    def remove_view(self, name: str) -> None:
+        """Remove a view from the database."""
+        self._view_tables = [table for table in self._view_tables if table.name != name]
 
     def normalize_query(self, sql: str) -> str:
         """Return SQL over base tables by replacing any subqueries from history."""

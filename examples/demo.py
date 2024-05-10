@@ -51,7 +51,11 @@ def run_meadow(api_key: str, duckdb_path: str, instruction: str) -> None:
         database=database,
         silent=False,
     )
-    controller = ControllerAgent(user=user, planner=planner, silent=False)
+    controller = ControllerAgent(
+        user=user,
+        planner=planner,
+        silent=False,
+    )
 
     # Start the task
     asyncio.run(controller.initiate_chat(instruction))

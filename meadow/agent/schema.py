@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class AgentMessage(ChatMessage):
     """The contents of the message."""
 
-    """Content that is for display only.
+    """Content that is for user display only.
 
     Useful when we want to carry the more detailed content into the chat history but only show the structured output to the user.
     """
@@ -21,7 +21,8 @@ class AgentMessage(ChatMessage):
 
     generating_agent: str
 
-    need_user_feedback: bool = False
+    """Error message used when messaging the validators."""
+    is_error_message: bool = False
 
     is_termination_message: bool = False
 

@@ -19,16 +19,16 @@ class EvalUserAgent(UserAgent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        reply = await self.generate_reply(messages=[message], sender=sender)
+        reply, to_send = await self.generate_reply(messages=[message], sender=sender)
         if reply.is_termination_message:
             return
-        await self.send(reply, sender)
+        await self.send(reply, to_send)
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> AgentMessage:
+    ) -> tuple[AgentMessage, "Agent"]:
         """Generate a reply."""
         if has_signal_string(messages[-1].content, "<exit>"):
             return AgentMessage(
@@ -36,9 +36,9 @@ class EvalUserAgent(UserAgent):
                 content="Goodbye!",
                 generating_agent=self.name,
                 is_termination_message=True,
-            )
+            ), sender
         return AgentMessage(
             role="assistant",
             content="<next>",
             generating_agent=self.name,
-        )
+        ), sender
