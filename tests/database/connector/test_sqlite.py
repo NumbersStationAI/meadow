@@ -69,7 +69,7 @@ def test_sqlite_connector_get_tables(sqlite_connector: SQLiteConnector) -> None:
 )
 def test_parametrized_sql_queries(
     sqlite_connector: SQLiteConnector, sql: str, expected_len: int
-):
+) -> None:
     """Test various SQL queries."""
     sqlite_connector.connect()
     df = sqlite_connector.run_sql_to_df(sql)

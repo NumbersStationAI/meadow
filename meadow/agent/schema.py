@@ -10,6 +10,26 @@ from meadow.client.schema import ChatMessage, ToolCall, ToolSpec
 logger = logging.getLogger(__name__)
 
 
+class Commands:
+    NEXT = "<next>"
+    END = "<end>"
+
+    @staticmethod
+    def _has_signal_string(content: str, signal_str: str) -> bool:
+        """Check if the message contains signalling string."""
+        return content.strip().endswith(signal_str) or content.strip().startswith(
+            signal_str
+        )
+
+    @staticmethod
+    def has_next(content: str) -> bool:
+        return Commands._has_signal_string(content, Commands.NEXT)
+
+    @staticmethod
+    def has_end(content: str) -> bool:
+        return Commands._has_signal_string(content, Commands.END)
+
+
 class AgentMessage(ChatMessage):
     """The contents of the message."""
 
@@ -17,7 +37,7 @@ class AgentMessage(ChatMessage):
 
     Useful when we want to carry the more detailed content into the chat history but only show the structured output to the user.
     """
-    display_content: str = None
+    display_content: str | None = None
 
     generating_agent: str
 

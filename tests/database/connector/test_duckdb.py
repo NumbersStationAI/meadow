@@ -69,7 +69,7 @@ def test_duckdb_connector_get_tables(duckdb_connector: DuckDBConnector) -> None:
 )
 def test_parametrized_sql_queries(
     duckdb_connector: DuckDBConnector, sql: str, expected_len: int
-):
+) -> None:
     """Test various SQL queries."""
     duckdb_connector.connect()
     df = duckdb_connector.run_sql_to_df(sql)

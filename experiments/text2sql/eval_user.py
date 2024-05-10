@@ -1,7 +1,7 @@
 from meadow.agent.agent import Agent
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.user import UserAgent
-from meadow.agent.utils import has_signal_string, print_message
+from meadow.agent.utils import print_message
 
 
 class EvalUserAgent(UserAgent):
@@ -19,26 +19,26 @@ class EvalUserAgent(UserAgent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        reply, to_send = await self.generate_reply(messages=[message], sender=sender)
+        reply = await self.generate_reply(messages=[message], sender=sender)
         if reply.is_termination_message:
             return
-        await self.send(reply, to_send)
+        await self.send(reply, sender)
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> tuple[AgentMessage, "Agent"]:
+    ) -> AgentMessage:
         """Generate a reply."""
-        if has_signal_string(messages[-1].content, "<exit>"):
+        if Commands.has_end(messages[-1].content):
             return AgentMessage(
                 role="assistant",
                 content="Goodbye!",
                 generating_agent=self.name,
                 is_termination_message=True,
-            ), sender
+            )
         return AgentMessage(
             role="assistant",
             content="<next>",
             generating_agent=self.name,
-        ), sender
+        )

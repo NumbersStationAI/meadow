@@ -56,17 +56,15 @@ class UserAgent(Agent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        reply, to_send = await self.generate_reply(messages=[message], sender=sender)
-        await self.send(reply, to_send)
+        reply = await self.generate_reply(messages=[message], sender=sender)
+        await self.send(reply, sender)
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> tuple[AgentMessage, "Agent"]:
+    ) -> AgentMessage:
         """Generate a reply based on the received messages."""
         # Get the input from a user
         reply = input(">>> ")
-        return AgentMessage(
-            role="assistant", content=reply, generating_agent=self.name
-        ), sender
+        return AgentMessage(role="assistant", content=reply, generating_agent=self.name)

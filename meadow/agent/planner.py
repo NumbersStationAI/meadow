@@ -1,17 +1,20 @@
 """Planner agent."""
 
+import json
 import logging
 import re
 import xml.etree.ElementTree as ElementTree
+from functools import partial
+from queue import Queue
 from typing import Callable
 
 from pydantic import BaseModel
 
-from meadow.agent.agent import Agent, LLMAgent
-from meadow.agent.schema import AgentMessage
+from meadow.agent.agent import Agent, ExecutorAgent, LLMAgent
+from meadow.agent.executor import DefaultExecutorAgent
+from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.utils import (
     generate_llm_reply,
-    has_signal_string,
     print_message,
 )
 from meadow.client.client import Client
@@ -45,15 +48,30 @@ Below are the agents you have access to.
 """
 
 
-class SubTask(BaseModel):
-    """Sub-task in a plan."""
+class SubTaskForParse(BaseModel):
+    """Sub-task in a plan used in executor."""
 
-    index: int
-    agent: str
+    agent_name: str
     prompt: str
 
 
-def parse_plan(message: str) -> list[SubTask]:
+class SubTask:
+    """Sub-task in a plan."""
+
+    agent: Agent
+    prompt: str
+
+    def __init__(self, agent: Agent, prompt: str):
+        self.agent = agent
+        self.prompt = prompt
+
+
+def parse_plan(
+    message: str,
+    agent_name: str,
+    database: Database,
+    available_agents: dict[str, Agent],
+) -> AgentMessage:
     """Extract the plan from the response.
 
     Plan follows
@@ -68,22 +86,33 @@ def parse_plan(message: str) -> list[SubTask]:
     if "<steps>" not in message:
         raise ValueError(f"Plan not found in the response. message={message}")
     inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
-    plan: list[SubTask] = []
+    plan: list[SubTaskForParse] = []
     try:
         root = ElementTree.fromstring(inner_steps)  # Parse the XML string
         for step in root:
             agent = (
                 step.find("agent").text if step.find("agent") is not None else "Unknown"
             )
+            if agent not in available_agents:
+                raise ValueError(
+                    f"Agent {agent} not found in available agents. Please only use {', '.join(available_agents.keys())}"
+                )
             instruction = (
                 step.find("instruction").text.strip()
                 if step.find("instruction") is not None
                 else "No instruction"
             )
-            plan.append(SubTask(index=len(plan), agent=agent, prompt=instruction))
-    except ElementTree.ParseError:
-        logger.error(f"Failed to parse the message as XML. message={message}")
-    return plan
+            plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
+    except ElementTree.ParseError as e:
+        error_message = f"Failed to parse the message as XML. e={e}"
+        raise ValueError(error_message)
+    return AgentMessage(
+        role="assistant",
+        content=json.dumps([m.model_dump() for m in plan]),
+        display_content=inner_steps,
+        tool_calls=None,
+        generating_agent=agent_name,
+    )
 
 
 class PlannerAgent(LLMAgent):
@@ -95,8 +124,8 @@ class PlannerAgent(LLMAgent):
         client: Client,
         llm_config: LLMConfig,
         database: Database | None,
+        executors: list[ExecutorAgent] = None,
         system_prompt: str = DEFAULT_PLANNER_PROMPT,
-        termination_message: str = "<exit>",
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -106,16 +135,26 @@ class PlannerAgent(LLMAgent):
         self._client = client
         self._llm_config = llm_config
         self._database = database
+        self._executors = executors
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
-        # start at -1 so when we first call move to next subtask,
-        # i.e. start the task, it will be 0
-        self._plan_index = -1
-        self._plan: list[SubTask] = []
-        self._termination_message = termination_message
+        self._plan: Queue[SubTask] = Queue()
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
+
+        # Override with defaults
+        if self._executors is None:
+            self._executors = [
+                DefaultExecutorAgent(
+                    client=self._client,
+                    llm_config=self._llm_config,
+                    database=self._database,
+                    execution_func=partial(
+                        parse_plan, available_agents=self._available_agents
+                    ),
+                )
+            ]
 
     @property
     def name(self) -> str:
@@ -142,7 +181,7 @@ class PlannerAgent(LLMAgent):
             serialized_schema = ""
         return self._system_prompt.format(
             serialized_schema=serialized_schema,
-            termination_message=self._termination_message,
+            termination_message=Commands.END,
             agents="\n".join(
                 [
                     f"<agent>\n{a.name}: {a.description}\n</agent>"
@@ -151,21 +190,22 @@ class PlannerAgent(LLMAgent):
             ),
         )
 
+    @property
+    def executors(self) -> list[ExecutorAgent] | None:
+        """The executor agents that should be used by this agent."""
+        return self._executors
+
     def has_plan(self) -> bool:
         """Check if the agent has a plan."""
-        return bool(self._plan)
+        return not self._plan.empty()
 
     def move_to_next_agent(
         self,
-    ) -> tuple[Agent | None, str | None]:
+    ) -> SubTask:
         """Move to the next agent in the task plan."""
-        self._plan_index += 1
-        if self._plan_index >= len(self._plan):
-            # logger.warning("No more sub-tasks in the plan.")
-            return None, None
-        sub_task = self._plan[self._plan_index]
-        agent = self._available_agents[sub_task.agent]
-        return agent, sub_task.prompt
+        if self._plan.empty():
+            return None
+        return self._plan.get()
 
     async def send(
         self,
@@ -199,16 +239,16 @@ class PlannerAgent(LLMAgent):
             message.content = f"<feedback>{message.content}</feedback>"
         self._messages.add_message(agent=sender, role="user", message=message)
 
-        reply, to_send = await self.generate_reply(
+        reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
         )
-        await self.send(reply, to_send)
+        await self.send(reply, sender)
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> tuple[AgentMessage, "Agent"]:
+    ) -> AgentMessage:
         """Generate a reply based on the received messages."""
         if self.llm_client is not None:
             chat_response = await generate_llm_reply(
@@ -227,23 +267,45 @@ class PlannerAgent(LLMAgent):
             content = chat_response.choices[0].message.content
             # print("CONTENT PLANNER", content)
             # print("*****")
-            if has_signal_string(content, self._termination_message):
+            if Commands.has_end(content):
                 return AgentMessage(
                     role="assistant",
                     content=content,
                     tool_calls=None,
                     generating_agent=self.name,
                     is_termination_message=True,
-                ), sender
+                )
             else:
-                # TODO: reask to fix errors
-                self._plan = parse_plan(content)
+                # Try to parse the plan. If it fails, that's okay. The error will be caught by
+                # the executor and we will hit the parsing plan option again.
+                display_content = None
+                try:
+                    parsed_plan_message = parse_plan(
+                        content, self.name, self._database, self._available_agents
+                    )
+                    display_content = parsed_plan_message.display_content
+                    parsed_plan = [
+                        SubTaskForParse(**m)
+                        for m in json.loads(parsed_plan_message.content)
+                    ]
+                    for sub_task in parsed_plan:
+                        self._plan.put(
+                            SubTask(
+                                agent=self._available_agents[sub_task.agent_name],
+                                prompt=sub_task.prompt,
+                            )
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"Error in parsing plan. Ignoring as executor should throw error back to fix. e={e}, message={content}."
+                    )
+                    pass
                 return AgentMessage(
                     role="assistant",
                     content=content,
-                    tool_calls=None,
+                    display_content=display_content,
                     generating_agent=self.name,
-                ), sender
+                )
         else:
             if len(self._available_agents) > 1:
                 raise ValueError("No LLM client provided and more than one agent.")
@@ -253,10 +315,10 @@ class PlannerAgent(LLMAgent):
                 .content.replace("<objective>", "")
                 .replace("</objective>", "")
             )
-            self._plan = [SubTask(index=0, agent=agent.name, prompt=raw_content)]
+            self._plan.put(SubTask(agent=agent, prompt=raw_content))
+            serialized_plan = f"<steps><step1><agent>{agent.name}</agent><instruction>{raw_content}</instruction></step1></steps>"
             return AgentMessage(
                 role="assistant",
-                content=f"Generated no plan and just using {agent.name}",
-                tool_calls=None,
+                content=serialized_plan,
                 generating_agent=self.name,
-            ), sender
+            )

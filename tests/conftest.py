@@ -22,7 +22,7 @@ def duckdb_cache() -> Generator[tuple[Cache, str], None, None]:
 
 
 @pytest.fixture
-def chat_request():
+def chat_request() -> ChatRequest:
     """Chat request."""
     return ChatRequest(
         messages=[

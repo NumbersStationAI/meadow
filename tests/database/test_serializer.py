@@ -65,7 +65,7 @@ def tables_with_views() -> list[Table]:
     ]
 
 
-def test_serialize_as_xml_no_view(tables: list[Table]):
+def test_serialize_as_xml_no_view(tables: list[Table]) -> None:
     xml_output = serialize_as_xml(tables)
     expected_xml = """
 <schema>
@@ -85,7 +85,7 @@ def test_serialize_as_xml_no_view(tables: list[Table]):
     ), "XML serialization should match expected output"
 
 
-def test_serialize_as_xml_with_view(tables_with_views: list[Table]):
+def test_serialize_as_xml_with_view(tables_with_views: list[Table]) -> None:
     xml_output = serialize_as_xml(tables_with_views)
     expected_xml = """
 <schema>

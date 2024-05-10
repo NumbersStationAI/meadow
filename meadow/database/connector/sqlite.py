@@ -58,7 +58,7 @@ FROM pragma_table_info('{table_name}');
 """
             columns_df = self.run_sql_to_df(column_sql)
             columns = [
-                Column(name=row.column_name, data_type=row.data_type)
+                Column(name=row.column_name, data_type=row.data_type)  # type: ignore
                 for row in columns_df.itertuples()
             ]
             tables.append(Table(name=table_name, columns=columns))
