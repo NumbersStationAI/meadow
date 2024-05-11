@@ -52,14 +52,14 @@ def chat_completion() -> ToolsBetaMessage:
     )
 
 
-def test_init(anthropic_client: AnthropicClient):
+def test_init(anthropic_client: AnthropicClient) -> None:
     """Test initialization of the Anthropic client."""
     assert anthropic_client.client is not None
 
 
 def test_convert_request_for_anthropic(
     anthropic_client: AnthropicClient, chat_request: ChatRequest
-):
+) -> None:
     """Test conversion of ChatRequest to Anthropic format."""
     request_dict = anthropic_client.convert_request_for_anthropic(chat_request)
     assert request_dict == {
@@ -115,7 +115,7 @@ def test_convert_request_for_anthropic(
 def test_convert_anthropic_to_response(
     anthropic_client: AnthropicClient,
     chat_completion: ToolsBetaMessage,
-):
+) -> None:
     """Test conversion of Anthropic response to ChatResponse."""
     response = anthropic_client.convert_anthropic_to_response(chat_completion)
     assert (
@@ -150,7 +150,7 @@ def test_convert_anthropic_to_response(
 def test_convert_anthropic_to_multi_messageresponse(
     anthropic_client: AnthropicClient,
     chat_completion: ToolsBetaMessage,
-):
+) -> None:
     """Test conversion of Anthropic response to ChatResponse."""
     chat_completion.content.extend(
         [
@@ -214,7 +214,7 @@ async def test_arun_chat(
     anthropic_client: AnthropicClient,
     chat_request: ChatRequest,
     chat_completion: ToolsBetaMessage,
-):
+) -> None:
     """Test sending a chat request."""
     # make return value work with await expression
     mock_response = AsyncMock(return_value=chat_completion)

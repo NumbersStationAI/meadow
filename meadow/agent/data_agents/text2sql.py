@@ -8,10 +8,9 @@ import sqlglot
 
 from meadow.agent.agent import Agent, DataAgent
 from meadow.agent.executor import DefaultExecutorAgent, ExecutorAgent
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.utils import (
     generate_llm_reply,
-    has_signal_string,
     print_message,
 )
 from meadow.client.client import Client
@@ -70,7 +69,7 @@ def parse_sqls(message: str) -> dict[str, str]:
 
 
 def parse_sql_response(
-    content: str, agent_name: str, termination_message: str, database: Database
+    content: str, agent_name: str, database: Database
 ) -> AgentMessage:
     """Generate a parsed response from the SQL query."""
     try:
@@ -79,71 +78,65 @@ def parse_sql_response(
         error_message = f"Failed to parse SQL in response. e={e}"
         logger.warning(error_message)
         raise ValueError(error_message)
-    any_new_table = any(database.get_table(k) is None for k in sql_dict.keys())
-    if has_signal_string(content, termination_message) and not any_new_table:
-        return AgentMessage(
-            role="assistant",
-            content=content,
-            tool_calls=None,
-            generating_agent=agent_name,
-            is_termination_message=True,
-        )
-    else:
+    try:
+        # update history with new SQL
+        added_views = set()
+        error_message = None
+        largest_k = max(sql_dict.keys(), key=lambda x: int(x[3:]))
+        for k, v in sql_dict.items():
+            view_table = database.get_table(k)
+            # If there is a new definition, then it's likely a reask and we should
+            # update
+            if view_table is not None and v == view_table.view_sql:
+                continue
+            else:
+                v = replace_tag_with_table(v)
+                v = database.normalize_query(v)
+                try:
+                    database.add_view(name=k, sql=v)
+                    added_views.add(k)
+                except Exception as e:
+                    error_message = f"Failed to add view to database. e={e}"
+                    logger.warning(error_message)
+                    # used to break out of try/except
+                    return  # type: ignore
         try:
-            # update history with new SQL
-            added_views = set()
-            error_message = None
-            largest_k = max(sql_dict.keys(), key=lambda x: int(x[3:]))
-            for k, v in sql_dict.items():
-                view_table = database.get_table(k)
-                # If there is a new definition, then it's likely a reask and we should
-                # update
-                if view_table is not None and v == view_table.view_sql:
-                    continue
-                else:
-                    v = replace_tag_with_table(v)
-                    v = database.normalize_query(v)
-                    try:
-                        database.add_view(name=k, sql=v)
-                        added_views.add(k)
-                    except Exception as e:
-                        error_message = f"Failed to add view to database. e={e}"
-                        logger.warning(error_message)
-                        return  # used to break out of try/except
-            try:
-                # get the last sql and return it fully parsed
-                last_sql = prettify_sql(database.get_table(largest_k).view_sql)
-            except Exception as e:
-                error_message = f"Failed to get last SQL from database. e={e}"
-                logger.warning(error_message)
-                return  # used to break out of try/except
-            try:
-                last_sql_df = database.run_sql_to_df(last_sql).head(5)
-            except Exception as e:
-                error_message = f"Failed to run SQL in DuckDB. e={e}"
-                logger.warning(error_message)
-                return  # used to break out of try/except
-            # TODO: add error to check if DF is empty or not
+            # get the last sql and return it fully parsed
+            last_sql = prettify_sql(database.get_table(largest_k).view_sql)
         except Exception as e:
             error_message = f"Failed to get last SQL from database. e={e}"
             logger.warning(error_message)
-            return  # used to break out of try/except
-        finally:
-            if error_message:
-                # Clean up possibly buggy views
-                for k in added_views:
-                    database.remove_view(k)
-                raise ValueError(error_message)
-        user_content = f"SQL:\n{last_sql}"
-        if last_sql_df is not None:
-            user_content += f"\n\nTable:\n{last_sql_df.to_string()}"
-        return AgentMessage(
-            role="assistant",
-            content=content,
-            display_content=user_content,
-            tool_calls=None,
-            generating_agent=agent_name,
-        )
+            # used to break out of try/except
+            return  # type: ignore
+        try:
+            last_sql_df = database.run_sql_to_df(last_sql).head(5)
+        except Exception as e:
+            error_message = f"Failed to run SQL in DuckDB. e={e}"
+            logger.warning(error_message)
+            # used to break out of try/except
+            return  # type: ignore
+        # TODO: add error to check if DF is empty or not
+    except Exception as e:
+        error_message = f"Failed to get last SQL from database. e={e}"
+        logger.warning(error_message)
+        # used to break out of try/except
+        return  # type: ignore
+    finally:
+        if error_message:
+            # Clean up possibly buggy views
+            for k in added_views:
+                database.remove_view(k)
+            raise ValueError(error_message)
+    user_content = f"SQL:\n{last_sql}"
+    if last_sql_df is not None:
+        user_content += f"\n\nTable:\n{last_sql_df.to_string()}"
+    return AgentMessage(
+        role="assistant",
+        content=content,
+        display_content=user_content,
+        tool_calls=None,
+        generating_agent=agent_name,
+    )
 
 
 class SQLGeneratorAgent(DataAgent):
@@ -156,7 +149,6 @@ class SQLGeneratorAgent(DataAgent):
         database: Database,
         executors: list[ExecutorAgent] = None,
         system_prompt: str = DEFAULT_SQL_PROMPT,
-        termination_message: str = "<exit>",
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -167,7 +159,6 @@ class SQLGeneratorAgent(DataAgent):
         self._database = database
         self._executors = executors
         self._system_prompt = system_prompt
-        self._termination_message = termination_message
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
@@ -209,7 +200,7 @@ class SQLGeneratorAgent(DataAgent):
         """Get the system message."""
         serialized_schema = serialize_as_xml(self.database.tables)
         return self._system_prompt.format(
-            schema=serialized_schema, termination_message=self._termination_message
+            schema=serialized_schema, termination_message=Commands.END
         )
 
     @property
@@ -243,16 +234,16 @@ class SQLGeneratorAgent(DataAgent):
             )
         self._messages.add_message(agent=sender, role="user", message=message)
 
-        reply, to_send = await self.generate_reply(
+        reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
         )
-        await self.send(reply, to_send)
+        await self.send(reply, sender)
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> tuple[AgentMessage, "Agent"]:
+    ) -> AgentMessage:
         """Generate a reply based on the received messages."""
         chat_response = await generate_llm_reply(
             client=self.llm_client,
@@ -275,4 +266,4 @@ class SQLGeneratorAgent(DataAgent):
             content=content,
             tool_calls=None,
             generating_agent=self.name,
-        ), sender
+        )

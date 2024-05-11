@@ -1,10 +1,8 @@
 import logging
-from functools import wraps
 from typing import Callable
 
 from termcolor import colored
 
-from meadow.agent.agent import Agent
 from meadow.agent.schema import AgentMessage
 from meadow.client.client import Client
 from meadow.client.schema import ChatResponse, LLMConfig, ToolSpec
@@ -45,14 +43,7 @@ def print_message(message: AgentMessage, from_agent: str, to_agent: str) -> None
         color = AVAILABLE_COLORS.pop(0)
         COLOR_MAP[from_agent] = color
     to_print = f"{from_agent} -> {to_agent}: {content}"
-    print(colored(to_print, color))
-
-
-def has_signal_string(content: str, signal_str: str) -> bool:
-    """Check if the message contains signalling string."""
-    return content.strip().endswith(signal_str) or content.strip().startswith(
-        signal_str
-    )
+    print(colored(to_print, color))  # type: ignore
 
 
 async def generate_llm_reply(

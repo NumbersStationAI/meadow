@@ -80,7 +80,15 @@ def get_simple_text2sql_agent(
         client=client,
         llm_config=llm_config,
         database=database,
-        executors=[],
+        executors=[
+            DefaultExecutorAgent(
+                client=None,
+                llm_config=llm_config,
+                database=database,
+                execution_func=parse_sql_response,
+                max_execution_attempts=0,
+            )
+        ],
         overwrite_cache=overwrite_cache,
         llm_callback=callback,
     )
@@ -119,7 +127,15 @@ def get_text2sql_planner_agent(
         client=client,
         llm_config=llm_config,
         database=database,
-        executors=[],
+        executors=[
+            DefaultExecutorAgent(
+                client=None,
+                llm_config=llm_config,
+                database=database,
+                execution_func=parse_sql_response,
+                max_execution_attempts=0,
+            )
+        ],
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -197,26 +213,10 @@ def get_text2sql_llm_reask_agent(
         "SQLGeneratorAgent",
         all_prompts_to_save,
     )
-    callback_validator = lambda model_messages, chat_response: model_callback(
-        model_messages,
-        chat_response,
-        example_idx,
-        "ValidatorAgent",
-        all_prompts_to_save,
-    )
-    # Validator has client now to run llm
-    validator = ExecutorAgent(
-        client=client,
-        llm_config=llm_config,
-        database=database,
-        overwrite_cache=overwrite_cache,
-        llm_callback=callback_validator,
-    )
     text2sql = SQLGeneratorAgent(
         client=client,
         llm_config=llm_config,
         database=database,
-        validator=validator,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )

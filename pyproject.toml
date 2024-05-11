@@ -34,13 +34,16 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.mypy]
 disallow_untyped_defs = true
-exclude = []
+exclude = ["experiments"]
 local_partial_types = true
 strict_optional = false
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
 module = []
+
+[tool.ruff]
+exclude = ["experiments"]
 
 [tool.ruff.lint]
 select = [

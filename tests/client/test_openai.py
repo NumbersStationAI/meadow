@@ -91,14 +91,14 @@ def chat_tool_completion() -> ChatCompletion:
     )
 
 
-def test_init(openai_client: OpenAIClient):
+def test_init(openai_client: OpenAIClient) -> None:
     """Test initialization of the OpenAI client."""
     assert openai_client.client is not None
 
 
 def test_convert_request_for_openai(
     openai_client: OpenAIClient, chat_request: ChatRequest
-):
+) -> None:
     """Test conversion of ChatRequest to OpenAI format."""
     request_dict = openai_client.convert_request_for_openai(chat_request)
     assert request_dict == {
@@ -131,7 +131,7 @@ def test_convert_openai_to_response(
     openai_client: OpenAIClient,
     chat_completion: ChatCompletion,
     chat_tool_completion: ChatCompletion,
-):
+) -> None:
     """Test conversion of OpenAI response to ChatResponse."""
     response = openai_client.convert_openai_to_response(chat_completion)
     assert response == ChatResponse(
@@ -180,7 +180,7 @@ async def test_arun_chat(
     openai_client: OpenAIClient,
     chat_request: ChatRequest,
     chat_completion: ChatCompletion,
-):
+) -> None:
     """Test sending a chat request."""
     # make return value work with await expression
     mock_response = AsyncMock(return_value=chat_completion)

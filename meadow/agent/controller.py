@@ -5,9 +5,9 @@ import logging
 from meadow.agent.agent import Agent
 from meadow.agent.executor import ExecutorAgent
 from meadow.agent.planner import PlannerAgent
-from meadow.agent.schema import AgentMessage, ToolRunner
+from meadow.agent.schema import AgentMessage, Commands, ToolRunner
 from meadow.agent.user import UserAgent
-from meadow.agent.utils import has_signal_string, print_message
+from meadow.agent.utils import print_message
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -21,8 +21,6 @@ class ControllerAgent(Agent):
         user: UserAgent,
         planner: PlannerAgent,
         tool_executors: list[ToolRunner] = None,
-        termination_message: str = "<exit>",
-        move_on_message: str = "<next>",
         silent: bool = True,
     ):
         self._user = user
@@ -34,9 +32,12 @@ class ControllerAgent(Agent):
             for agent in planner._available_agents.values()
             if agent.executors
         }
+        if planner.executors:
+            self._agent_executors[planner] = planner.executors
+        # Current agent we are actively talking to (can be use)
+        self._current_agent: Agent = self._planner
+        # Current agent solving the task (not a user)
         self._current_task_agent: Agent = self._planner
-        self._termination_message = termination_message
-        self._move_on_message = move_on_message
         self._silent = silent
 
     @property
@@ -48,6 +49,14 @@ class ControllerAgent(Agent):
     def description(self) -> str:
         """Get the description of the agent."""
         return "Overlord"
+
+    def set_current_agent(self, agent: Agent) -> None:
+        """Set the current task agent."""
+        self._current_agent = agent
+
+    def set_current_task_agent(self, agent: Agent) -> None:
+        """Set the current task."""
+        self._current_task_agent = agent
 
     async def send(
         self,
@@ -76,39 +85,37 @@ class ControllerAgent(Agent):
         # update the message history
         self._messages.add_message(agent=sender, role="user", message=message)
 
-        # In the beginning, the current task agent is the planner so we should
-        # generate a plan immediately
-        if self._current_task_agent != self._planner:
-            assert self._planner.has_plan()
-
-        reply, to_send = await self.generate_reply(
+        reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
         )
         if reply.is_termination_message:
             return
-        await self.send(reply, to_send)
+        await self.send(reply, self._current_agent)
 
-    async def _generate_next_step_reply(self) -> tuple[AgentMessage, "Agent"]:
+    async def _generate_next_step_reply(self) -> AgentMessage:
         """Generate a reply to move to the next step in the task plan."""
-        self._current_task_agent, next_message = self._planner.move_to_next_agent()
-        # If the planner has no more steps, then we should terminate the conversation
-        if self._current_task_agent is None:
-            return AgentMessage(
-                role="assistant",
-                content=self._termination_message,
-                generating_agent=self.name,
-                is_termination_message=True,
-            ), self._user
+        next_task = self._planner.move_to_next_agent()
+        if next_task:
+            self.set_current_task_agent(next_task.agent)
+            self.set_current_agent(next_task.agent)
+            next_message = next_task.prompt
+            assert next_message, "Prompt cannot be empty"
+        else:
+            self.set_current_agent(self._user)
+            next_message = Commands.END
         return AgentMessage(
-            role="assistant", content=next_message, generating_agent=self.name
-        ), self._current_task_agent
+            role="assistant",
+            content=next_message,
+            generating_agent=self.name,
+            is_termination_message=next_message == Commands.END,
+        )
 
     async def _generate_executed_reply(
         self, messages: list[AgentMessage], sender: Agent
-    ) -> tuple[AgentMessage, "Agent"]:
-        """Generate a reply after validation.
+    ) -> AgentMessage:
+        """Generate a reply after execution.
 
-        If the validation is never an error, return the last executor response which could do some
+        If the execution does not error, return the last executor response which could do some
         parsing of the output.
 
         Otherwise, return the first error message.
@@ -121,46 +128,42 @@ class ControllerAgent(Agent):
             generating_agent=self.name,
         )
         for executor in self._agent_executors.get(sender, []):
-            executor_response, _ = await executor.generate_reply(messages, sender)
+            executor_response = await executor.generate_reply(messages, sender)
             if executor_response.is_error_message:
-                return executor_response, sender
-        # We know that executor_response is not an error message
+                self.set_current_agent(sender)
+                return executor_response
         final_response = executor_response or default_response
-        return (
-            final_response,
-            self._user if sender != self._user else self._current_task_agent,
+        # The current_task_agent is the agent of the task that is currently answering the user's
+        # question. current_agent is whoever we last chatted with. When a user responds, current_agent
+        # will be the user and current_task_agent will be the llm agent of the task
+        self.set_current_agent(
+            self._user if sender != self._user else self._current_task_agent
         )
+        return final_response
 
     async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
-    ) -> tuple[AgentMessage, "Agent"]:
+    ) -> AgentMessage:
         """Generate a reply based on the received messages."""
-        # We iterate over options to determine how to generate a reply
-        # (a) If the last message is a termination message
-        #     (i) If the last message is from the user, then we should terminate the conversation
-        #     (ii) If the last message is from an agent, then we should move on to next step in task
-        #          plan and send to that agent.
-        # (b) If the last message is a DSL "next" message
-        #     (i) The last message must be from the user, then we should move on to the next step in the task plan
-        # (c) If the last message is a tool call, run the tool call. If error, send back to agent.
-        # otherwise, send to user.
-        # (d) Otherwise, the last message is text. If the last message is from the user, then we should
-        #     send to the current task agent. If the last message is from an agent, then we should send to user.
-        if has_signal_string(messages[-1].content, self._termination_message):
-            if sender == self._user:
-                return AgentMessage(
-                    role="assistant",
-                    content=self._termination_message,
-                    generating_agent=self.name,
-                    is_termination_message=True,
-                ), self._user
-            else:
-                return await self._generate_next_step_reply()
-        elif has_signal_string(messages[-1].content, self._move_on_message):
+        # TODO: add comments once finalized
+        if Commands.has_next(messages[-1].content):
             assert sender == self._user, "Only user can send move on message."
             return await self._generate_next_step_reply()
+        elif Commands.has_end(messages[-1].content):
+            # If user wants to quit, return to them and quit immediately
+            # But if a agent says to end, that means move on to next step
+            if sender == self._user:
+                self.set_current_agent(self._user)
+                return AgentMessage(
+                    role="assistant",
+                    content=Commands.END,
+                    generating_agent=self.name,
+                    is_termination_message=True,
+                )
+            else:
+                return await self._generate_next_step_reply()
         else:
             return await self._generate_executed_reply(messages, sender)
 
