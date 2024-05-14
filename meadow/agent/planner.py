@@ -25,7 +25,7 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the user, please break down the objective into a sequence of sub-tasks that can be solved by one the following agents. For each step sub-task in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. The user may also provide suggestions to the plan that you should take into account when generating the plan. When generating a plan, please use the following tag format to specify the plan.
+DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve. For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. You can use the same agent multiple times. If you are confused by the task or need more details, please ask for feedback. The user may also provide suggestions to the plan that you should take into account when generating the plan. When generating a plan, please use the following tag format to specify the plan.
 
 <steps>
 <step1>
@@ -38,7 +38,7 @@ DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the use
 ...
 </steps>
 
-If the user responds back at some point with a message that indicates the user is satisfied with the plan, please output {termination_message} and nothing else. In other words, only output a plan or {termination_message}.
+If the user responds back at some point with a message that indicates the user is satisfied with the plan, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
 {serialized_schema}
 Below are the agents you have access to.
 
@@ -205,7 +205,12 @@ class PlannerAgent(LLMAgent):
         """Move to the next agent in the task plan."""
         if self._plan.empty():
             return None
-        return self._plan.get()
+        subtask = self._plan.get()
+        # When moving on, reset executors to allow for new attempts
+        if subtask.agent.executors:
+            for ex in subtask.agent.executors:
+                ex.reset_execution_attempts()
+        return subtask
 
     async def send(
         self,

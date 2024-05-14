@@ -18,20 +18,21 @@ def validate_sql(sql: str, dialect: str) -> tuple[bool, str | None]:
         return False, str(e)
 
 
-def replace_view_select_star_with_def(
-    sql: str, view_sql_pairs: list[tuple[str, str]]
+def add_views_as_ctes(
+    sql: str, view_sql_pairs: list[tuple[str, str]], dialect: str = "sqlite"
 ) -> str:
-    """Replace SELECT * FROM <view_name> with the view definition."""
+    """ADD <view_name>, <view_def> as CTES.."""
+
+    views_to_add = []
     for view_name, view_sql in view_sql_pairs:
-        if view_name not in sql:
-            continue
-        if f"(SELECT * FROM {view_name})" in sql:
-            sql = sql.replace(
-                f"(SELECT * FROM {view_name})", f"({view_sql}) AS {view_name}"
-            )
-        else:
-            sql = sql.replace(f"{view_name}", f"({view_sql}) AS {view_name}")
-    return sql
+        if view_name in sql:
+            views_to_add.append((view_name, view_sql))
+    if not views_to_add:
+        return sql
+    parsed = sqlglot.parse_one(sql, dialect=dialect)
+    for view_name, view_sql in views_to_add:
+        parsed = parsed.with_(view_name, view_sql)
+    return parsed.sql(dialect=dialect)
 
 
 # TODO: does this need to be a class or can it just be a pydantic thing
@@ -43,21 +44,22 @@ class Database:
         self._connector = connector
 
         self._connector.connect()
-        self._base_tables = self._connector.get_tables()
+        self._base_tables = {tbl.name: tbl for tbl in self._connector.get_tables()}
         self._connector.close()
 
-        self._view_tables: list[Table] = []
+        self._view_tables: dict[str, Table] = {}
 
     @property
     def tables(self) -> list[Table]:
         """Get the tables in the database."""
-        return self._base_tables + self._view_tables
+        return list(self._base_tables.values()) + list(self._view_tables.values())
 
     def get_table(self, name: str) -> Table | None:
         """Get the table by name."""
-        for table in self.tables:
-            if table.name == name:
-                return table
+        if name in self._base_tables:
+            return self._base_tables[name]
+        if name in self._view_tables:
+            return self._view_tables[name]
         return None
 
     def run_sql_to_df(self, sql: str) -> pd.DataFrame:
@@ -74,13 +76,16 @@ class Database:
             raise ValueError(
                 f"Invalid SQL sql={sql}, dialect={self._connector.dialect}, error={error}"
             )
-        self._view_tables.append(Table(name=name, is_view=True, view_sql=sql))
+        self._view_tables[name] = Table(name=name, is_view=True, view_sql=sql)
 
     def remove_view(self, name: str) -> None:
         """Remove a view from the database."""
-        self._view_tables = [table for table in self._view_tables if table.name != name]
+        if name in self._view_tables:
+            del self._view_tables[name]
 
     def normalize_query(self, sql: str) -> str:
         """Return SQL over base tables by replacing any subqueries from history."""
-        view_sql_pairs = [(table.name, table.view_sql) for table in self._view_tables]
-        return replace_view_select_star_with_def(sql, view_sql_pairs)
+        view_sql_pairs = [
+            (name, table.view_sql) for name, table in self._view_tables.items()
+        ]
+        return add_views_as_ctes(sql, view_sql_pairs)

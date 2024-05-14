@@ -14,6 +14,10 @@ from meadow.database.database import Database
 
 logger = logging.getLogger(__name__)
 
+SIMPLE_SQL_PROMPT = """Given the table schema and user's question, generate a SQLite SQL query that answers it. Use <sql></sql> tags for the SQL. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
+
+{schema}
+"""
 
 class PromptLog(BaseModel):
     """Prompt log."""
@@ -61,6 +65,7 @@ def model_callback(
 def get_simple_text2sql_agent(
     user_agent: UserAgent,
     client: Client,
+    big_client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
@@ -89,6 +94,7 @@ def get_simple_text2sql_agent(
                 max_execution_attempts=0,
             )
         ],
+        system_prompt=SIMPLE_SQL_PROMPT,
         overwrite_cache=overwrite_cache,
         llm_callback=callback,
     )
@@ -106,6 +112,7 @@ def get_simple_text2sql_agent(
 def get_text2sql_planner_agent(
     user_agent: UserAgent,
     client: Client,
+    big_client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
@@ -141,7 +148,7 @@ def get_text2sql_planner_agent(
     )
     planner = PlannerAgent(
         available_agents=[text2sql],
-        client=client,
+        client=big_client,
         llm_config=llm_config,
         database=database,
         overwrite_cache=overwrite_cache,
@@ -154,6 +161,7 @@ def get_text2sql_planner_agent(
 def get_text2sql_simple_reask_agent(
     user_agent: UserAgent,
     client: Client,
+    big_client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
@@ -182,6 +190,7 @@ def get_text2sql_simple_reask_agent(
         llm_config=llm_config,
         database=database,
         executors=no_llm_executor,
+        system_prompt=SIMPLE_SQL_PROMPT,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -196,9 +205,60 @@ def get_text2sql_simple_reask_agent(
     return controller
 
 
+def get_text2sql_simple_reask_planner_agent(
+    user_agent: UserAgent,
+    client: Client,
+    big_client: Client,
+    llm_config: LLMConfig,
+    database: Database,
+    overwrite_cache: bool,
+    all_prompts_to_save: list,
+    example_idx: int,
+) -> Agent:
+    """Get a simple text2sql agent."""
+    callback_sql = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "SQLGeneratorAgent",
+        all_prompts_to_save,
+    )
+    callback_planner = lambda model_messages, chat_response: model_callback(
+        model_messages, chat_response, example_idx, "PlannerAgent", all_prompts_to_save
+    )
+    # Have to build custom executor that doesn't use LLM
+    no_llm_executor = [
+        DefaultExecutorAgent(
+            client=None,
+            llm_config=None,
+            database=database,
+            execution_func=parse_sql_response,
+        )
+    ]
+    text2sql = SQLGeneratorAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        executors=no_llm_executor,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_sql,
+    )
+    planner = PlannerAgent(
+        available_agents=[text2sql],
+        client=big_client,
+        llm_config=llm_config,
+        database=database,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_planner,
+    )
+    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    return controller
+
+
 def get_text2sql_llm_reask_agent(
     user_agent: UserAgent,
     client: Client,
+    big_client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
@@ -217,6 +277,7 @@ def get_text2sql_llm_reask_agent(
         client=client,
         llm_config=llm_config,
         database=database,
+        system_prompt=SIMPLE_SQL_PROMPT,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )

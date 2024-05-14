@@ -21,33 +21,24 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQL_PROMPT = """Given the table schema and user's question, first think about it step-by-step within <thinking></thinking> tags and then generate a SQLite SQL query that answers it. Use <sql1></sql1>, <sql2></sql2>, ... tags for the SQL, depending on if previous queries were already generated in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use sql# to represent that view with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, simply output {termination_message} tag and nothing else. In other words, either output SQL or {termination_message} tag, but not both.
+DEFAULT_SQL_PROMPT = """Given the table schema and user's question, first think about it step-by-step within <thinking></thinking> tags and then generate a {dialect} SQL query that answers it. Use <sql1></sql1>, <sql2></sql2>, ... tags for the SQL, depending on if previous queries were already generated in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use sql# to represent that view with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
+
+{schema}
+"""
+
+DEFAULT_SQL_PROMPT = """Given the table schema and user's question, generate a {dialect} SQL query that answers it. Use <sql1></sql1>, <sql2></sql2>, ... tags for the SQL, depending on if previous queries were already generated in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use sql# to represent that view with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
 
 {schema}
 """
 
 
-def prettify_sql(sql: str) -> str:
+def prettify_sql(sql: str, dialect: str = "sqlite") -> str:
     """Prettify the SQL query."""
     try:
-        sql = sqlglot.parse_one(sql, dialect="duckdb").sql(
-            dialect="duckdb", pretty=True
-        )
+        sql = sqlglot.parse_one(sql, dialect=dialect).sql(dialect=dialect, pretty=True)
     except Exception as e:
-        logger.warning(f"Failed to parse SQL in DuckDB format. sql={sql}, e={e}")
+        logger.warning(f"Failed to parse SQL in {dialect} format. sql={sql}, e={e}")
         pass
-    return sql
-
-
-def replace_tag_with_table(sql: str) -> str:
-    """Return SQL over view SELECT statement.
-
-    Assumes the name in the tag is the name of the view.
-    """
-
-    sql_tags = re.findall(r"\({0,1}<sql\d+>\){0,1}", sql)
-    for tag in sql_tags:
-        sql = sql.replace(tag, f"(SELECT * FROM {tag[1:-1]})")
     return sql
 
 
@@ -68,16 +59,29 @@ def parse_sqls(message: str) -> dict[str, str]:
     return sql_dict
 
 
+def handle_unnumbered_sqls(message: str) -> str:
+    """For each <sql></sql> tag that doesn't have a number, add one."""
+    sql_components = re.findall(r"(<sql>(.*?)<\/sql>)", message, re.DOTALL)
+    for i, sql_pair in enumerate(sql_components):
+        sql_with_tag, sql = sql_pair
+        message = message.replace(sql_with_tag, f"<sql{i+1}>{sql}</sql{i+1}>")
+    return message
+
+
 def parse_sql_response(
     content: str, agent_name: str, database: Database
 ) -> AgentMessage:
     """Generate a parsed response from the SQL query."""
     try:
+        content = handle_unnumbered_sqls(content)
         sql_dict = parse_sqls(content)
     except Exception as e:
         error_message = f"Failed to parse SQL in response. e={e}"
         logger.warning(error_message)
         raise ValueError(error_message)
+    new_tables = [tbl for tbl in sql_dict.keys() if not database.get_table(tbl)]
+    if new_tables and "<end>" in content:
+        print("BAD")
     try:
         # update history with new SQL
         added_views = set()
@@ -90,7 +94,6 @@ def parse_sql_response(
             if view_table is not None and v == view_table.view_sql:
                 continue
             else:
-                v = replace_tag_with_table(v)
                 v = database.normalize_query(v)
                 try:
                     database.add_view(name=k, sql=v)
@@ -111,7 +114,7 @@ def parse_sql_response(
         try:
             last_sql_df = database.run_sql_to_df(last_sql).head(5)
         except Exception as e:
-            error_message = f"Failed to run SQL in DuckDB. e={e}"
+            error_message = f"Failed to run SQL in SQLite. e={e}"
             logger.warning(error_message)
             # used to break out of try/except
             return  # type: ignore
@@ -172,6 +175,7 @@ class SQLGeneratorAgent(DataAgent):
                     llm_config=self._llm_config,
                     database=self._database,
                     execution_func=parse_sql_response,
+                    llm_callback=self._llm_callback,
                 )
             ]
 
@@ -183,7 +187,7 @@ class SQLGeneratorAgent(DataAgent):
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "Generates SQL queries based on given user instructions. The instructions should be detailed descriptions of what attributes, aggregates, and conditions are needed in the SQL query. The instructions should ask a concrete question that can be answered by a single query."
+        return "Generates a SQL query based on given user instruction. Each instruction should be detailed descriptions of what attributes, aggregates, and conditions are needed in the SQL query. Each instruction should ask a concrete question that can be answered by a single, simple query."
 
     @property
     def llm_client(self) -> Client:
@@ -200,7 +204,7 @@ class SQLGeneratorAgent(DataAgent):
         """Get the system message."""
         serialized_schema = serialize_as_xml(self.database.tables)
         return self._system_prompt.format(
-            schema=serialized_schema, termination_message=Commands.END
+            schema=serialized_schema, termination_message=Commands.END, dialect="SQLite"
         )
 
     @property
@@ -259,8 +263,8 @@ class SQLGeneratorAgent(DataAgent):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        # print("SQL AGENT CONTENT", content)
-        # print("*****")
+        print("SQL AGENT CONTENT", content)
+        print("*****")
         return AgentMessage(
             role="assistant",
             content=content,

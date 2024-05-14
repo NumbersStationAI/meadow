@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import json
+import os
 import random
 import re
 from pathlib import Path
@@ -20,6 +21,7 @@ from experiments.text2sql.agent_factory import (
     get_text2sql_llm_reask_agent,
     get_text2sql_planner_agent,
     get_text2sql_simple_reask_agent,
+    get_text2sql_simple_reask_planner_agent,
 )
 from experiments.text2sql.eval_user import EvalUserAgent
 from experiments.text2sql.utils import load_data, read_tables_json
@@ -31,6 +33,7 @@ from meadow.client.api.openai import OpenAIClient
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.connector.connector import Table
+from meadow.database.connector.duckdb import DuckDBConnector
 from meadow.database.connector.sqlite import SQLiteConnector
 from meadow.database.database import Database
 from meadow.history.message_history import MessageHistory
@@ -50,6 +53,7 @@ class TextToSQLParams(BaseModel):
 async def agenerate_sql(
     text_to_sql_in: list[TextToSQLParams],
     client: Client,
+    big_client: Client,
     llm_config: LLMConfig,
     overwrite_cache: bool,
     # all_prompts_db: duckdb.DuckDBPyConnection,
@@ -60,7 +64,10 @@ async def agenerate_sql(
     all_prompts_to_save: list[list[PromptLog]] = [[] for _ in text_to_sql_in]
     for i, text_to_sql in enumerate(text_to_sql_in):
         # load database
-        connector = SQLiteConnector(text_to_sql.database_path)
+        if Path(text_to_sql.database_path).suffix == ".sqlite":
+            connector = SQLiteConnector(text_to_sql.database_path)
+        else:
+            connector = DuckDBConnector(text_to_sql.database_path)
         database = Database(connector=connector)
 
         # load "user" agent
@@ -75,6 +82,7 @@ async def agenerate_sql(
             agent = get_simple_text2sql_agent(
                 user_agent=user_agent,
                 client=client,
+                big_client=big_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -85,6 +93,7 @@ async def agenerate_sql(
             agent = get_text2sql_planner_agent(
                 user_agent=user_agent,
                 client=client,
+                big_client=big_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -95,6 +104,18 @@ async def agenerate_sql(
             agent = get_text2sql_simple_reask_agent(
                 user_agent=user_agent,
                 client=client,
+                big_client=big_client,
+                llm_config=llm_config,
+                database=database,
+                overwrite_cache=overwrite_cache,
+                all_prompts_to_save=all_prompts_to_save,
+                example_idx=i,
+            )
+        elif text_to_sql.agent_type == "text2sql_with_simple_reask_planner":
+            agent = get_text2sql_simple_reask_planner_agent(
+                user_agent=user_agent,
+                client=client,
+                big_client=big_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -105,6 +126,7 @@ async def agenerate_sql(
             agent = get_text2sql_llm_reask_agent(
                 user_agent=user_agent,
                 client=client,
+                big_client=big_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -127,6 +149,7 @@ async def agenerate_sql(
 def generate_sql(
     text_to_sql_in: list[TextToSQLParams],
     client: Client,
+    big_client: Client,
     llm_config: LLMConfig,
     overwrite_cache: bool,
     async_batch_size: int,
@@ -144,6 +167,7 @@ def generate_sql(
             agenerate_sql(
                 batch,
                 client=client,
+                big_client=big_client,
                 llm_config=llm_config,
                 overwrite_cache=overwrite_cache,
             )
@@ -165,11 +189,13 @@ def generate_sql(
         assert evuse
         messages = list(cast(MessageHistory, agent._messages).get_messages(evuse))
         last_sql_message = None
+
         for msg in messages[::-1]:
             if "SQL:" in msg.display_content:
                 last_sql_message = msg
                 break
         if last_sql_message is None:
+            print("DID NOT FIND SQL FOR", msg.content)
             sql = ""
         else:
             sql = (
@@ -194,11 +220,15 @@ def get_text_to_sql_in(
     db_id = input_question.get("db_id", None)
     assert db_id in db_to_tables, f"db_id {db_id} not in db_to_tables"
 
+    possible_db_path = database_path / db_id / f"{db_id}.sqlite"
+    if not possible_db_path.exists():
+        possible_db_path = database_path / db_id / f"{db_id}.duckdb"
+
     text_to_sql_in = TextToSQLParams(
         instruction=question,
         agent_type=agent_type,
         db_id=db_id,
-        database_path=str(database_path / db_id / f"{db_id}.sqlite"),
+        database_path=str(possible_db_path),
     )
     return text_to_sql_in
 
@@ -229,6 +259,7 @@ def cli() -> None:
 # Client options
 @click.option("--api-provider", type=str, default="anthropic")
 @click.option("--model", type=str, default="claude-3-opus-20240229")
+@click.option("--big-model", type=str, default="claude-3-opus-20240229")
 @click.option(
     "--client-cache-path",
     type=str,
@@ -251,6 +282,7 @@ def predict(
     temperature: float,
     api_provider: str,
     model: str,
+    big_model: str,
     client_cache_path: str,
     api_key: str,
     overwrite_cache: bool,
@@ -277,6 +309,11 @@ def predict(
         cache=cache,
         api_client=api_client,
         model=model,
+    )
+    big_client = Client(
+        cache=cache,
+        api_client=api_client,
+        model=big_model,
     )
 
     console.print("Loading metadata...")
@@ -320,6 +357,7 @@ def predict(
             predictions, prompts = generate_sql(
                 text_to_sql_in=[text_to_sql_in[i]],
                 client=client,
+                big_client=big_client,
                 llm_config=llm_config,
                 overwrite_cache=overwrite_cache,
                 async_batch_size=async_batch_size,
@@ -339,6 +377,7 @@ def predict(
         generated_sqls, generated_prompts = generate_sql(
             text_to_sql_in=text_to_sql_in,
             client=client,
+            big_client=big_client,
             llm_config=llm_config,
             overwrite_cache=overwrite_cache,
             async_batch_size=async_batch_size,
