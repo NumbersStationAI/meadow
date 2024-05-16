@@ -3,7 +3,6 @@
 import asyncio
 import datetime
 import json
-import os
 import random
 import re
 from pathlib import Path
@@ -19,6 +18,7 @@ from experiments.text2sql.agent_factory import (
     PromptLog,
     get_simple_text2sql_agent,
     get_text2sql_llm_reask_agent,
+    get_text2sql_llm_reask_planner_agent,
     get_text2sql_planner_agent,
     get_text2sql_simple_reask_agent,
     get_text2sql_simple_reask_planner_agent,
@@ -53,7 +53,7 @@ class TextToSQLParams(BaseModel):
 async def agenerate_sql(
     text_to_sql_in: list[TextToSQLParams],
     client: Client,
-    big_client: Client,
+    planner_client: Client,
     llm_config: LLMConfig,
     overwrite_cache: bool,
     # all_prompts_db: duckdb.DuckDBPyConnection,
@@ -61,8 +61,9 @@ async def agenerate_sql(
     """Async SQL generation."""
     text_to_sql_for_gather = []
     agents_gather = []
-    all_prompts_to_save: list[list[PromptLog]] = [[] for _ in text_to_sql_in]
+    all_prompts_to_save: list[list[PromptLog]] = []
     for i, text_to_sql in enumerate(text_to_sql_in):
+        all_prompts_to_save.append([])
         # load database
         if Path(text_to_sql.database_path).suffix == ".sqlite":
             connector = SQLiteConnector(text_to_sql.database_path)
@@ -82,7 +83,7 @@ async def agenerate_sql(
             agent = get_simple_text2sql_agent(
                 user_agent=user_agent,
                 client=client,
-                big_client=big_client,
+                planner_client=planner_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -93,7 +94,7 @@ async def agenerate_sql(
             agent = get_text2sql_planner_agent(
                 user_agent=user_agent,
                 client=client,
-                big_client=big_client,
+                planner_client=planner_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -104,7 +105,7 @@ async def agenerate_sql(
             agent = get_text2sql_simple_reask_agent(
                 user_agent=user_agent,
                 client=client,
-                big_client=big_client,
+                planner_client=planner_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -115,7 +116,7 @@ async def agenerate_sql(
             agent = get_text2sql_simple_reask_planner_agent(
                 user_agent=user_agent,
                 client=client,
-                big_client=big_client,
+                planner_client=planner_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -126,7 +127,18 @@ async def agenerate_sql(
             agent = get_text2sql_llm_reask_agent(
                 user_agent=user_agent,
                 client=client,
-                big_client=big_client,
+                planner_client=planner_client,
+                llm_config=llm_config,
+                database=database,
+                overwrite_cache=overwrite_cache,
+                all_prompts_to_save=all_prompts_to_save,
+                example_idx=i,
+            )
+        elif text_to_sql.agent_type == "text2sql_with_llm_reask_planner":
+            agent = get_text2sql_llm_reask_planner_agent(
+                user_agent=user_agent,
+                client=client,
+                planner_client=planner_client,
                 llm_config=llm_config,
                 database=database,
                 overwrite_cache=overwrite_cache,
@@ -149,13 +161,15 @@ async def agenerate_sql(
 def generate_sql(
     text_to_sql_in: list[TextToSQLParams],
     client: Client,
-    big_client: Client,
+    planner_client: Client,
     llm_config: LLMConfig,
     overwrite_cache: bool,
     async_batch_size: int,
-) -> tuple[list[AgentMessage], list[list[PromptLog]]]:
+) -> tuple[list[tuple[str, str]], list[list[PromptLog]]]:
     """Ask agent to generate SQL."""
     # Batch inputs for asyncio
+    # REMOVE ME
+    # text_to_sql_in = text_to_sql_in[3:4]
     text_to_sql_in_batches = [
         text_to_sql_in[i : i + async_batch_size]
         for i in range(0, len(text_to_sql_in), async_batch_size)
@@ -167,7 +181,7 @@ def generate_sql(
             agenerate_sql(
                 batch,
                 client=client,
-                big_client=big_client,
+                planner_client=planner_client,
                 llm_config=llm_config,
                 overwrite_cache=overwrite_cache,
             )
@@ -180,12 +194,11 @@ def generate_sql(
     sql_responses = []
     for i in range(len(agents)):
         agent = agents[i]
-        # Hack to get text2sql agent chat
+        # Hack to get text2sql and user agent chat
         evuse = None
         for ag in agent._messages.get_all_messages().keys():
             if "user" in ag.name.lower():
                 evuse = ag
-                break
         assert evuse
         messages = list(cast(MessageHistory, agent._messages).get_messages(evuse))
         last_sql_message = None
@@ -197,13 +210,18 @@ def generate_sql(
         if last_sql_message is None:
             print("DID NOT FIND SQL FOR", msg.content)
             sql = ""
+            tbl = ""
         else:
             sql = (
                 last_sql_message.display_content.split("Table:")[0]
                 .strip()[len("SQL:") :]
                 .strip()
             )
-        sql_responses.append(sql)
+            # noramlize sql with the views
+            database: Database = agent._planner._database
+            sql = database.normalize_query(sql)
+            tbl = last_sql_message.display_content.split("Table:")[1].strip()
+        sql_responses.append((sql, tbl))
 
     assert len(sql_responses) == len(text_to_sql_in)
     return sql_responses, all_prompts_list
@@ -258,14 +276,16 @@ def cli() -> None:
 @click.option("--temperature", type=float, default=0)
 # Client options
 @click.option("--api-provider", type=str, default="anthropic")
+@click.option("--planner-api-provider", type=str, default="anthropic")
 @click.option("--model", type=str, default="claude-3-opus-20240229")
-@click.option("--big-model", type=str, default="claude-3-opus-20240229")
+@click.option("--planner-model", type=str, default="claude-3-opus-20240229")
+@click.option("--api-key", type=str, required=True)
+@click.option("--planner-api-key", type=str, required=True)
 @click.option(
     "--client-cache-path",
     type=str,
     default="/home/lorr1/projects/code/meadow/test_cache.duckdb",
 )
-@click.option("--api-key", type=str, required=True)
 @click.option("--overwrite-cache", is_flag=True, default=False)
 def predict(
     dataset_path: str,
@@ -281,10 +301,12 @@ def predict(
     max_tokens: int,
     temperature: float,
     api_provider: str,
+    planner_api_provider: str,
     model: str,
-    big_model: str,
+    planner_model: str,
     client_cache_path: str,
     api_key: str,
+    planner_api_key: str,
     overwrite_cache: bool,
 ) -> None:
     """Predict SQL."""
@@ -305,15 +327,22 @@ def predict(
         api_client = OpenAIClient(api_key=api_key)
     else:
         raise ValueError(f"Unknown api provider {api_provider}")
+
+    if planner_api_provider == "anthropic":
+        planner_api_client = AnthropicClient(api_key=planner_api_key)
+    elif planner_api_provider == "openai":
+        planner_api_client = OpenAIClient(api_key=planner_api_key)
+    else:
+        raise ValueError(f"Unknown api provider {planner_api_provider}")
     client = Client(
         cache=cache,
         api_client=api_client,
         model=model,
     )
-    big_client = Client(
+    planner_client = Client(
         cache=cache,
-        api_client=api_client,
-        model=big_model,
+        api_client=planner_api_client,
+        model=planner_model,
     )
 
     console.print("Loading metadata...")
@@ -346,7 +375,7 @@ def predict(
     if run_name:
         run_name = f"{run_name}_"
     suffix = f"{run_name}{full_dataset_path.stem}_{date_today}.json"  # noqa: E501
-    prefix = f"{agent_type}_{model}"
+    prefix = f"{agent_type}_{model}_{planner_model}"
     output_filename = f"{prefix}_{suffix}"
     console.print(f"Saving to {Path(output_dir) / output_filename}")
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -357,15 +386,17 @@ def predict(
             predictions, prompts = generate_sql(
                 text_to_sql_in=[text_to_sql_in[i]],
                 client=client,
-                big_client=big_client,
+                planner_client=planner_client,
                 llm_config=llm_config,
                 overwrite_cache=overwrite_cache,
                 async_batch_size=async_batch_size,
             )
             for prediction, prompt in zip(predictions, prompts):
-                prediction = re.sub(r"[\s\t\n]+", " ", prediction)
+                sql, tbl = prediction
+                prediction = re.sub(r"[\s\t\n]+", " ", sql)
                 console.print(f"[blue]Prompt:[/blue] {json.dumps(prompt, indent=2)}")
-                console.print(f"[red]Prediction:[/red] {prediction}")
+                console.print(f"[red]Prediction SQL:[/red] {sql}")
+                console.print(f"[red]Prediction Table:[/red] {tbl}")
                 if data[i].get("query") or data[i].get("sql"):
                     console.print(
                         "[purple]Gold:[/purple] "
@@ -377,18 +408,19 @@ def predict(
         generated_sqls, generated_prompts = generate_sql(
             text_to_sql_in=text_to_sql_in,
             client=client,
-            big_client=big_client,
+            planner_client=planner_client,
             llm_config=llm_config,
             overwrite_cache=overwrite_cache,
             async_batch_size=async_batch_size,
         )
 
         for i in range(len(generated_sqls)):
-            prediction = generated_sqls[i]
+            sql, tbl = generated_sqls[i]
             prompt = [m.laurel_serialize() if m else None for m in generated_prompts[i]]
             entry = {
                 **original_data[i],
-                "pred": prediction,
+                "pred": sql,
+                "pred_table": tbl,
                 "prompt": prompt,
             }
             print(json.dumps(entry), file=fout)

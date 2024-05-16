@@ -256,6 +256,7 @@ class PlannerAgent(LLMAgent):
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
         if self.llm_client is not None:
+            print(self.system_message)
             chat_response = await generate_llm_reply(
                 client=self.llm_client,
                 messages=messages,
@@ -270,8 +271,8 @@ class PlannerAgent(LLMAgent):
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
-            # print("CONTENT PLANNER", content)
-            # print("*****")
+            print("CONTENT PLANNER", content)
+            print("*****")
             if Commands.has_end(content):
                 return AgentMessage(
                     role="assistant",

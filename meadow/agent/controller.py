@@ -69,8 +69,8 @@ class ControllerAgent(Agent):
         if not message:
             logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
-        print(colored(f"ADDING ASSISTANT {recipient.name}", "red"))
-        print("MESSAGE", message.content)
+        # print(colored(f"ADDING ASSISTANT {recipient.name}", "red"))
+        # print("MESSAGE", message.content)
         self._messages.add_message(agent=recipient, role="assistant", message=message)
         await recipient.receive(message, self)
 
