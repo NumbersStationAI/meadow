@@ -5,7 +5,6 @@ import re
 from typing import Callable
 
 import sqlglot
-from termcolor import colored
 
 from meadow.agent.agent import Agent, DataAgent
 from meadow.agent.executor import DefaultExecutorAgent, ExecutorAgent
@@ -21,11 +20,6 @@ from meadow.database.serializer import serialize_as_xml
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_SQL_PROMPT = """Given the table schema and user's question, first think about it step-by-step within <thinking></thinking> tags and then generate a {dialect} SQL query that answers it. Use <sql1></sql1>, <sql2></sql2>, ... tags for the SQL, depending on if previous queries were already generated in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use sql# to represent that view with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
-
-{schema}
-"""
 
 DEFAULT_SQL_PROMPT = """You generate {dialect} SQL queries and are a {dialect} expert. Given the table schema and user's question, generate a {dialect} SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
 
