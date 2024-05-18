@@ -2,6 +2,8 @@
 
 import logging
 
+from termcolor import colored
+
 from meadow.agent.agent import Agent
 from meadow.agent.executor import ExecutorAgent
 from meadow.agent.planner import PlannerAgent
@@ -67,6 +69,8 @@ class ControllerAgent(Agent):
         if not message:
             logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
+        # print(colored(f"ADDING ASSISTANT {recipient.name}", "red"))
+        # print("MESSAGE", message.content)
         self._messages.add_message(agent=recipient, role="assistant", message=message)
         await recipient.receive(message, self)
 
@@ -83,6 +87,8 @@ class ControllerAgent(Agent):
                 to_agent=self.name,
             )
         # update the message history
+        print(colored(f"ADDING USER {sender.name}", "blue"))
+        print("MESSAGE", message.content)
         self._messages.add_message(agent=sender, role="user", message=message)
 
         reply = await self.generate_reply(

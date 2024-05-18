@@ -1684,6 +1684,32 @@ files = [
 tests = ["pytest", "pytest-cov"]
 
 [[package]]
+name = "textdistance"
+version = "4.6.2"
+description = "Compute distance between the two texts."
+optional = false
+python-versions = ">=3.5"
+files = [
+    {file = "textdistance-4.6.2-py3-none-any.whl", hash = "sha256:40683a5fa3d9cc32bf8c80ec7d0ac7e96074872409becd3239e24cf673ef8e82"},
+    {file = "textdistance-4.6.2.tar.gz", hash = "sha256:01e1fbcf7b871eb8f41911d94f461b0b99cf8003384ee0e1c34ca5c1a7ab2ed0"},
+]
+
+[package.extras]
+all = ["Levenshtein", "distance", "jellyfish", "numpy", "py-stringmatching", "pylev", "pyxDamerauLevenshtein", "rapidfuzz (>=2.6.0)", "tabulate"]
+benchmark = ["Levenshtein", "distance", "jellyfish", "numpy", "py-stringmatching", "pylev", "pyxDamerauLevenshtein", "rapidfuzz (>=2.6.0)", "tabulate"]
+benchmarks = ["Levenshtein", "distance", "jellyfish", "numpy", "py-stringmatching", "pylev", "pyxDamerauLevenshtein", "rapidfuzz (>=2.6.0)", "tabulate"]
+common = ["Levenshtein", "jellyfish", "numpy", "pyxDamerauLevenshtein", "rapidfuzz (>=2.6.0)"]
+dameraulevenshtein = ["jellyfish", "pyxDamerauLevenshtein", "rapidfuzz (>=2.6.0)"]
+extra = ["Levenshtein", "jellyfish", "numpy", "pyxDamerauLevenshtein", "rapidfuzz (>=2.6.0)"]
+extras = ["Levenshtein", "jellyfish", "numpy", "pyxDamerauLevenshtein", "rapidfuzz (>=2.6.0)"]
+hamming = ["Levenshtein", "distance", "jellyfish", "rapidfuzz (>=2.6.0)"]
+jaro = ["Levenshtein", "rapidfuzz (>=2.6.0)"]
+jarowinkler = ["jellyfish", "rapidfuzz (>=2.6.0)"]
+levenshtein = ["Levenshtein", "rapidfuzz (>=2.6.0)"]
+lint = ["flake8", "flake8-blind-except", "flake8-bugbear", "flake8-commas", "flake8-logging-format", "flake8-mutable", "flake8-pep3101", "flake8-quotes", "flake8-string-format", "flake8-tidy-imports", "isort", "mypy", "pep8-naming", "twine", "types-tabulate"]
+test = ["hypothesis", "isort", "numpy", "pytest"]
+
+[[package]]
 name = "tokenizers"
 version = "0.19.1"
 description = ""
@@ -1950,4 +1976,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "26f8518434210cdd3ebd310cbb1337d4b0ed1a9ee1a6be8e9a537d330c23e884"
+content-hash = "c13822ec733c8e100289481850566f0acc84558c996c6ce4323828bc86b77173"

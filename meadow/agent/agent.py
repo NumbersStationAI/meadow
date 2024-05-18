@@ -72,6 +72,11 @@ class ExecutorAgent:
         ...
 
     @abstractmethod
+    def reset_execution_attempts(self) -> None:
+        """Reset the number of execution attempts."""
+        ...
+
+    @abstractmethod
     async def generate_reply(
         self,
         messages: list[AgentMessage],

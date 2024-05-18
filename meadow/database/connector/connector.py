@@ -11,7 +11,7 @@ class Column(BaseModel):
     name: str
     """Name of the column."""
 
-    data_type: str
+    data_type: str | None = None
     """Data type of the column."""
 
     sample_values: list[Any] | None = None
@@ -29,6 +29,9 @@ class Table(BaseModel):
 
     name: str
     """Name of the table."""
+
+    description: str | None = None
+    """Description of the table."""
 
     is_view: bool = False
     """If view or not."""

@@ -42,6 +42,18 @@ class SQLiteConnector(Connector):
         """Run an SQL query."""
         return pd.read_sql_query(sql, self.conn)
 
+    def get_column_sample_values(
+        self, table_name: str, column_name: str, limit: int = 3
+    ) -> list:
+        """Get sample values for a column."""
+        sql = f"""
+SELECT DISTINCT {column_name}
+FROM {table_name}
+LIMIT {limit}
+ORDER BY RANDOM();
+"""
+        return self.run_sql_to_df(sql)[column_name].tolist()
+
     def get_tables(self) -> list[Table]:
         """Get the tables in the database."""
         sql = """
@@ -57,8 +69,13 @@ SELECT name as column_name, type as data_type
 FROM pragma_table_info('{table_name}');
 """
             columns_df = self.run_sql_to_df(column_sql)
+            columns = []
+            for row in columns_df.itertuples():
+                # Get sample values for the column
+                # sample_values = self.get_column_sample_values(table_name, row.column_name)  # type: ignore
+                columns.append(Column(name=row.column_name, data_type=row.data_type))  # type: ignore
             columns = [
-                Column(name=row.column_name, data_type=row.data_type)  # type: ignore
+                Column(name=row.column_name, data_type=row.data_type)
                 for row in columns_df.itertuples()
             ]
             tables.append(Table(name=table_name, columns=columns))

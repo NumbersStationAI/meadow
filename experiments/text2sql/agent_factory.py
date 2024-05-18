@@ -14,6 +14,43 @@ from meadow.database.database import Database
 
 logger = logging.getLogger(__name__)
 
+SIMPLE_SQL_PROMPT = """Given the table schema and user's question, generate a SQLite SQL query that answers it. Use <sql></sql> tags for the SQL. Feel free to think through what you need to do first. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
+
+{schema}
+"""
+
+SQL_PLANNER_PROMPT = """The user wants to answer an analytics question in SQL based on the following schema.
+
+{serialized_schema}
+The user's question may be complex or vague. Based on the following question provided by the user, please make a plan consisting of a sequence of sub-SQL-queries for how to answer this question using the following agents:
+
+<agents>
+{agents}
+</agents>
+
+For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. To reference a past step (e.g. step 2), please use the phrase `sql 2` to reference the second sql generated. You can use the same agent multiple times. If you are confused by the task or need more details, please ask for feedback. The user may also provide suggestions to the plan that you should take into account when generating the plan. When generating a plan, please use the following tag format to specify the plan.
+
+<steps>
+<step1>
+<agent>...</agent>
+<instruction>...</instruction>
+</step1>
+<step2>
+...
+</step2>
+...
+</steps>
+
+If the user responds back at some point with a message that indicates the user is satisfied with the plan, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
+
+Lastly, use as few steps as possible."""
+
+SQL_EXECUTOR_PROMPT = """You are a error debugging SQL assistant who needs to help a user understand their SQL error message and suggest how to fix it.
+
+Below is the data schema the user is working with.
+{serialized_schema}
+
+Given the user's message below, please explain the error and suggset in freeform text how to fix the query. The query may need additional tables, fixes in function use, or other modifications. Please provide a detailed explanation of the error and how to fix it."""
 
 class PromptLog(BaseModel):
     """Prompt log."""
@@ -61,6 +98,7 @@ def model_callback(
 def get_simple_text2sql_agent(
     user_agent: UserAgent,
     client: Client,
+    planner_client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
@@ -89,6 +127,7 @@ def get_simple_text2sql_agent(
                 max_execution_attempts=0,
             )
         ],
+        system_prompt=SIMPLE_SQL_PROMPT,
         overwrite_cache=overwrite_cache,
         llm_callback=callback,
     )
@@ -97,6 +136,7 @@ def get_simple_text2sql_agent(
         client=None,
         llm_config=llm_config,
         database=database,
+        system_prompt=SQL_PLANNER_PROMPT,
         overwrite_cache=overwrite_cache,
     )
     controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
@@ -106,6 +146,7 @@ def get_simple_text2sql_agent(
 def get_text2sql_planner_agent(
     user_agent: UserAgent,
     client: Client,
+    planner_client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
@@ -141,9 +182,10 @@ def get_text2sql_planner_agent(
     )
     planner = PlannerAgent(
         available_agents=[text2sql],
-        client=client,
+        client=planner_client,
         llm_config=llm_config,
         database=database,
+        system_prompt=SQL_PLANNER_PROMPT,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )
@@ -154,6 +196,7 @@ def get_text2sql_planner_agent(
 def get_text2sql_simple_reask_agent(
     user_agent: UserAgent,
     client: Client,
+    planner_client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
@@ -182,6 +225,7 @@ def get_text2sql_simple_reask_agent(
         llm_config=llm_config,
         database=database,
         executors=no_llm_executor,
+        system_prompt=SIMPLE_SQL_PROMPT,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -190,15 +234,17 @@ def get_text2sql_simple_reask_agent(
         client=None,
         llm_config=llm_config,
         database=database,
+        system_prompt=SQL_PLANNER_PROMPT,
         overwrite_cache=overwrite_cache,
     )
     controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
     return controller
 
 
-def get_text2sql_llm_reask_agent(
+def get_text2sql_simple_reask_planner_agent(
     user_agent: UserAgent,
     client: Client,
+    planner_client: Client,
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
@@ -213,10 +259,72 @@ def get_text2sql_llm_reask_agent(
         "SQLGeneratorAgent",
         all_prompts_to_save,
     )
+    callback_planner = lambda model_messages, chat_response: model_callback(
+        model_messages, chat_response, example_idx, "PlannerAgent", all_prompts_to_save
+    )
+    # Have to build custom executor that doesn't use LLM
+    no_llm_executor = [
+        DefaultExecutorAgent(
+            client=None,
+            llm_config=None,
+            database=database,
+            execution_func=parse_sql_response,
+        )
+    ]
     text2sql = SQLGeneratorAgent(
         client=client,
         llm_config=llm_config,
         database=database,
+        executors=no_llm_executor,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_sql,
+    )
+    planner = PlannerAgent(
+        available_agents=[text2sql],
+        client=planner_client,
+        llm_config=llm_config,
+        database=database,
+        system_prompt=SQL_PLANNER_PROMPT,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_planner,
+    )
+    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    return controller
+
+
+def get_text2sql_llm_reask_agent(
+    user_agent: UserAgent,
+    client: Client,
+    planner_client: Client,
+    llm_config: LLMConfig,
+    database: Database,
+    overwrite_cache: bool,
+    all_prompts_to_save: list,
+    example_idx: int,
+) -> Agent:
+    """Get a simple text2sql agent."""
+    callback_sql = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "SQLGeneratorAgent",
+        all_prompts_to_save,
+    )
+    llm_executor = [
+        DefaultExecutorAgent(
+            client=client,
+            llm_config=llm_config,
+            database=database,
+            system_prompt=SQL_EXECUTOR_PROMPT,
+            execution_func=parse_sql_response,
+        )
+    ]
+    text2sql = SQLGeneratorAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        executors=llm_executor,
+        system_prompt=SIMPLE_SQL_PROMPT,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -225,7 +333,60 @@ def get_text2sql_llm_reask_agent(
         client=None,
         llm_config=llm_config,
         database=database,
+        system_prompt=SQL_PLANNER_PROMPT,
         overwrite_cache=overwrite_cache,
+    )
+    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    return controller
+
+
+def get_text2sql_llm_reask_planner_agent(
+    user_agent: UserAgent,
+    client: Client,
+    planner_client: Client,
+    llm_config: LLMConfig,
+    database: Database,
+    overwrite_cache: bool,
+    all_prompts_to_save: list,
+    example_idx: int,
+) -> Agent:
+    """Get a simple text2sql agent."""
+    callback_sql = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "SQLGeneratorAgent",
+        all_prompts_to_save,
+    )
+    callback_planner = lambda model_messages, chat_response: model_callback(
+        model_messages, chat_response, example_idx, "PlannerAgent", all_prompts_to_save
+    )
+    llm_executor = [
+        DefaultExecutorAgent(
+            client=client,
+            llm_config=llm_config,
+            database=database,
+            system_prompt=SQL_EXECUTOR_PROMPT,
+            execution_func=parse_sql_response,
+        )
+    ]
+    text2sql = SQLGeneratorAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        executors=llm_executor,
+        system_prompt=SIMPLE_SQL_PROMPT,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_sql,
+    )
+    planner = PlannerAgent(
+        available_agents=[text2sql],
+        client=planner_client,
+        llm_config=llm_config,
+        database=database,
+        system_prompt=SQL_PLANNER_PROMPT,
+        overwrite_cache=overwrite_cache,
+        llm_callback=callback_planner,
     )
     controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
     return controller

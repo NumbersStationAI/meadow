@@ -12,8 +12,14 @@ import click
 import pandas as pd
 from tqdm.auto import tqdm
 
+from meadow.cache.duckdb import DuckDBCache
+from meadow.client.client import Client
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "."))
 # from metrics.spider import evaluation as spider_evaluation  # type: ignore # noqa: E402
+from meadow.client.api.openai import OpenAIClient
+from meadow.database.connector.sqlite import SQLiteConnector
+from meadow.database.database import Database
 from metrics.test_suite_sql_eval import (  # type: ignore # noqa: E402
     evaluation as test_suite_evaluation,
 )
@@ -21,6 +27,7 @@ from metrics.test_suite_sql_eval import (  # type: ignore # noqa: E402
 from experiments.text2sql.utils import (  # type: ignore  # noqa: E402
     correct_casing,
     edit_distance,
+    execution_accuracy,
 )
 
 LEVELS = ["easy", "medium", "hard", "duckdb", "ddl", "all"]
@@ -150,6 +157,32 @@ def compute_test_suite_metric(
     return evaluator.scores, by_row_metrics
 
 
+def compute_execution_accuracy(
+    gold_sqls: list[str],
+    pred_sqls: list[str],
+    gold_dbs: list[str],
+    db_dir: str,
+    client: Client,
+) -> tuple[float, float, list[float], list[float]]:
+    """Compute execution accuracy in utils."""
+    scores = []
+    empty_res_scores = []
+    for gold_sql, pred_sql, gold_db in tqdm(
+        zip(gold_sqls, pred_sqls, gold_dbs), total=len(gold_sqls), desc="Exec Acc Ours"
+    ):
+        connector = SQLiteConnector(db_path = str(Path(db_dir) / gold_db / f"{gold_db}.sqlite"))
+        database = Database(connector=connector)
+        try:
+            exec_score, empty_res_score = execution_accuracy(gold_sql, pred_sql, database, client)
+            scores.append(exec_score)
+            empty_res_scores.append(empty_res_score)
+        except Exception as e:
+            scores.append(0)
+            empty_res_scores.append(0)
+            pass
+    return sum(scores) / len(scores), sum(empty_res_scores) / len(empty_res_scores), scores, empty_res_scores
+
+
 def compute_metrics(
     gold_sqls: list[str],
     pred_sqls: list[str],
@@ -157,6 +190,7 @@ def compute_metrics(
     kmaps: dict,
     database_dir: str,
     model_name: str,
+    client: Client,
 ) -> dict[str, str]:
     """Compute all metrics for data slice."""
     if len(gold_sqls) != len(pred_sqls):
@@ -165,7 +199,7 @@ def compute_metrics(
         )
     all_metrics: dict[str, Any] = {}
 
-    # Execution Accuracy
+    # Execution Accuracy (Spider)
     metrics, by_row_metrics = compute_test_suite_metric(
         pred_sqls,
         gold_sqls,
@@ -177,12 +211,29 @@ def compute_metrics(
     all_metrics["by_row_exec"] = by_row_metrics
     print_scores(metrics, model_name, "exec")
 
-    # Exact Match Accuracy
+    # Exact Match Accuracy (Spider)
     metrics = compute_exact_match_metric(
         pred_sqls, gold_sqls, gold_dbs, kmaps, database_dir
     )
     all_metrics["exact"] = metrics
     print_scores(metrics, model_name, "exact")
+
+    # Execution Accuracy (Ours)
+    exec_sc, empty_res, exec_by_row, empty_res_by_row = compute_execution_accuracy(
+        gold_sqls,
+        pred_sqls,
+        gold_dbs,
+        database_dir,
+        client,
+    )
+    all_metrics["exec_ours"] = {"exec_ours": exec_sc}
+    all_metrics["nonempty_results"] = {"nonempty_results": empty_res}
+    all_metrics["by_row_exec_ours"] = exec_by_row
+    all_metrics["by_row_nonempty_results"] = empty_res_by_row
+    print("\n>====================== EXECUTION OURS ACCURACY =====================")
+    print(f"{exec_sc:.3f}")
+
+    # Get number emp
 
     # Equality Accuracy
     per_row_match = [
@@ -210,6 +261,8 @@ def get_to_print(metrics: dict, key: str, model_name: str, num_rows: int) -> dic
         "support": num_rows,
         "exec": f"{metrics[key]['exec']['all']['exec']:.3f}",
         "exact": f"{metrics[key]['exact']['all']['exact']:.3f}",
+        "exec_ours": f"{metrics[key]['exec_ours']['exec_ours']:.3f}",
+        "nonempty_results": f"{metrics[key]['nonempty_results']['nonempty_results']:.3f}",
         "equality": f"{metrics[key]['equality']['equality']:.3f}",
         "edit_distance": f"{metrics[key]['edit_distance']['edit_distance']:.3f}",
     }
@@ -232,6 +285,13 @@ def cli() -> None:
 @click.option(
     "--correct-sql-casing", type=bool, is_flag=True, default=False, required=False
 )
+@click.option("--api-key", type=str, required=True)
+@click.option("--model", type=str, default="gpt-4o")
+@click.option(
+    "--client-cache-path",
+    type=str,
+    default="/home/lorr1/projects/code/meadow/test_cache.duckdb",
+)
 def evaluate(
     gold: str,
     pred: str,
@@ -241,6 +301,9 @@ def evaluate(
     output_dir: str,
     output_filename: str,
     correct_sql_casing: bool,
+    api_key: str,
+    model: str,
+    client_cache_path: str,
 ) -> None:
     """Evaluate SQL.
 
@@ -254,6 +317,12 @@ def evaluate(
         output_filename: the prediction output filename
         correct_sql_casing: whether to correct casing of SQL keywords
     """
+    # Setup model
+    cache = DuckDBCache(client_cache_path)
+    api_provider = OpenAIClient(api_key=api_key)
+    client = Client(api_client=api_provider, model=model, cache=cache)
+    
+    # Setup sqls
     gold_path = Path(gold)
     pred_path = Path(pred)
     model_name = pred_path.stem
@@ -299,6 +368,7 @@ def evaluate(
         kmaps=kmaps,
         database_dir=db,
         model_name=model_name + "(all)",
+        client=client,
     )
 
     for k, v in final_metrics["all"].items():
@@ -323,6 +393,7 @@ def evaluate(
                 kmaps=kmaps,
                 database_dir=db,
                 model_name=model_name + f"({unq_value})",
+                client=client,
             )
             to_print.append(
                 get_to_print(final_metrics, unq_value, model_name, len(idx_set))

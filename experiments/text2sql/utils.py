@@ -1,12 +1,17 @@
 """Utility metrics."""
 
+import asyncio
 import json
 from collections import defaultdict
 
+import pandas as pd
 import sqlglot
 from sqlglot import parse_one
+import textdistance
 
+from meadow.client.client import Client
 from meadow.database.connector.connector import Column, Table
+from meadow.database.database import Database
 
 
 def load_data(path: str) -> list[dict]:
@@ -108,3 +113,95 @@ def edit_distance(s1: str, s2: str) -> int:
                 )
         distances = distances_
     return distances[-1]
+
+
+def compare_pred_ref(
+    pred_df: pd.DataFrame, ref_df: pd.DataFrame, ref_to_pred_col_map: dict[str, str], row_order_matters: bool
+) -> tuple[float, str]:
+    """Compare the input dataframes and see if they have the same content.
+
+    We assume column order doesn't matter.
+
+    If row order doesn't matter, we sort the values for a table first.
+
+    Args:
+        pred_df: the dataframe return by the predicted sql
+        ref_df: the dataframe return by the reference sql
+    Returns:
+        a float score measuring similarity f1 looking at the collection of rows
+    """
+    # For each column in the ref_df, find the matching column (if exists) in the 
+    # pred_df and compare the values via F1 (if order doesn't matter) or directly (if order matters)
+    pred_cols_mapped = [ref_to_pred_col_map.get(ref_col) for ref_col in ref_df.columns if ref_to_pred_col_map.get(ref_col) is not None]
+    pred_df_to_compare = pred_df[pred_cols_mapped]
+    if not row_order_matters:
+        pred_df_to_compare = pred_df_to_compare.sort_values(by=pred_cols_mapped)
+        ref_df = ref_df.sort_values(by=ref_df.columns.tolist())
+    # print(pred_df_to_compare)
+    # print()
+    # print(ref_df)
+    total_scores = []
+    for ref_col_name in ref_df.columns:
+        ref_col = ref_df[ref_col_name].tolist()
+        pred_col_name = ref_to_pred_col_map.get(ref_col_name)
+        if pred_col_name is None:
+            pred_col = [None] * len(ref_col)
+        else:
+            pred_col = pred_df_to_compare[pred_col_name].tolist()
+        # Compare the column values
+        similarity = textdistance.levenshtein.similarity(ref_col, pred_col)
+        score = (similarity / max(len(ref_col), len(pred_col)))
+        total_scores.append(score)
+    # print(total_scores)
+    return sum(total_scores) / len(total_scores)
+
+
+def execution_accuracy(
+    gold: str,
+    pred: str,
+    database: Database,
+    client: Client,
+) -> tuple[float, float]:
+    """Evaluate execution accuracy for one example."""
+    final_score = 0
+    assert gold, "Gold SQL is empty"
+    if not pred:
+        return 0, 0
+    try:
+        df_pred = database.run_sql_to_df(pred)
+    except Exception as e:
+        return 0, 0
+    df_gold = database.run_sql_to_df(gold)
+    # Try to find matching columns for each col in df
+    prompt = [
+        {
+            "role": "system",
+            "content": """Please output a JSON map of the reference columns to the predicted columns given the dataframes. Make you best guess as to which columns map to which. If there is a column in either table that doesn't match, please leave it out."""
+        },
+        {
+            "role": "user",
+            "content": f"""Reference DataFrames:
+{df_gold.head(10).to_string()}
+
+Predicted DataFrames:
+{df_pred.head(10).to_string()}"""
+        }
+    ]
+    result = asyncio.run(client.chat(messages=prompt, response_format={"type": "json_object"}))
+
+    ref_to_pred_col_map = json.loads(result.choices[0].message.content)
+
+    # Detect if row order matters if the gold SQL has an order by in the outermost SQL
+    parsed = sqlglot.parse_one(gold, read="sqlite")
+    # The outermost args will only show last SELECT arguments and will ignore order by
+    # clauses in the subqueries
+    row_order_matters = parsed.args.get("order") is not None
+
+    # Compare the two dataframes
+    final_score = compare_pred_ref(df_pred, df_gold, ref_to_pred_col_map, row_order_matters=row_order_matters)
+    # Check if pred empty or None value
+    if df_pred.empty or all(df_pred.isnull().all()):
+        empty_res = 0
+    else:
+        empty_res = 1
+    return final_score, empty_res

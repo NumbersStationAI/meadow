@@ -22,7 +22,7 @@ DEFAULT_EXECUTOR_PROMPT = """You are a error describing assistant who needs to h
 Below is the data schema the user is working with.
 {serialized_schema}
 
-Given the user's message below, please explain the error and hypothesis how to fix in <thinking></thinking> tags. Then, in free form text, summarize your thinking that explains the error and suggests possible fixes."""
+Given the user's message below, please explain the error and hypothesis how to fix. In free form text, summarize your thinking that explains the error and suggests possible fixes."""
 
 ERROR_MESSAGE = """I'm sorry, I'm having a hard time running. Please try to rephrase."""
 

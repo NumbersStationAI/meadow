@@ -21,33 +21,25 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQL_PROMPT = """Given the table schema and user's question, first think about it step-by-step within <thinking></thinking> tags and then generate a SQLite SQL query that answers it. Use <sql1></sql1>, <sql2></sql2>, ... tags for the SQL, depending on if previous queries were already generated in the conversation. IMPORTANT: if you want to use a prior query's result as a subquery or table, use sql# to represent that view with the # is replaced with the number of the sql tag. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, simply output {termination_message} tag and nothing else. In other words, either output SQL or {termination_message} tag, but not both.
+DEFAULT_SQL_PROMPT = """You generate {dialect} SQL queries and are a {dialect} expert. Given the table schema and user's question, generate a {dialect} SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
 
+1. Feel free to think through what you need to do first.
+2. Use <description></description> tags for a one sentence description of what the table captures. Be concise.
+3. Use <sql></sql> tags for the SQL. Please refer to views and base tables in the SQL if necessary.
+4. If the user responds back at some point with a message that indicates the user is satisfied with the SQL (e.g. "looks good" or "continue to next step"), response ONLY with {termination_message} tags. They should NEVER be used in conjunction with <sql> or other tags.
+
+The user's schema is:
 {schema}
 """
 
 
-def prettify_sql(sql: str) -> str:
+def prettify_sql(sql: str, dialect: str = "sqlite") -> str:
     """Prettify the SQL query."""
     try:
-        sql = sqlglot.parse_one(sql, dialect="duckdb").sql(
-            dialect="duckdb", pretty=True
-        )
+        sql = sqlglot.parse_one(sql, dialect=dialect).sql(dialect=dialect, pretty=True)
     except Exception as e:
-        logger.warning(f"Failed to parse SQL in DuckDB format. sql={sql}, e={e}")
+        logger.warning(f"Failed to parse SQL in {dialect} format. sql={sql}, e={e}")
         pass
-    return sql
-
-
-def replace_tag_with_table(sql: str) -> str:
-    """Return SQL over view SELECT statement.
-
-    Assumes the name in the tag is the name of the view.
-    """
-
-    sql_tags = re.findall(r"\({0,1}<sql\d+>\){0,1}", sql)
-    for tag in sql_tags:
-        sql = sql.replace(tag, f"(SELECT * FROM {tag[1:-1]})")
     return sql
 
 
@@ -57,7 +49,9 @@ def parse_sqls(message: str) -> dict[str, str]:
     # this will return a list of tuples where the tuples are the groups
     sql_components = re.findall(r"(<sql\d+>(.*?)<\/sql\d+>)", message, re.DOTALL)
     if not sql_components:
-        raise ValueError(f"SQL not found in the response. message={message}")
+        raise ValueError(
+            "SQL not found in the response. Please use <sql> tags to mark the SQL."
+        )
     sql_dict = {}
     for sql_pair in sql_components:
         sql_with_tag, sql = sql_pair
@@ -68,12 +62,37 @@ def parse_sqls(message: str) -> dict[str, str]:
     return sql_dict
 
 
+def parse_description(message: str) -> str | None:
+    """Extract the description from the response."""
+    # find <description></description> tags and return the description
+    description_components = re.findall(
+        r"(<description>(.*?)<\/description>)", message, re.DOTALL
+    )
+    if not description_components:
+        return None
+    return description_components[0][1].strip()
+
+
+def handle_unnumbered_sqls(message: str, next_sql_i: int) -> str:
+    """For each <sql></sql> tag that doesn't have a number, add one."""
+    sql_components = re.findall(r"(<sql>(.*?)<\/sql>)", message, re.DOTALL)
+    for i, sql_pair in enumerate(sql_components):
+        sql_with_tag, sql = sql_pair
+        message = message.replace(
+            sql_with_tag, f"<sql{next_sql_i+i}>{sql}</sql{next_sql_i+i}>"
+        )
+    return message
+
+
 def parse_sql_response(
     content: str, agent_name: str, database: Database
 ) -> AgentMessage:
     """Generate a parsed response from the SQL query."""
     try:
+        content = handle_unnumbered_sqls(content, database.get_number_of_views() + 1)
         sql_dict = parse_sqls(content)
+        assert len(sql_dict) == 1, "Only one SQL query should be generated."
+        description = parse_description(content)
     except Exception as e:
         error_message = f"Failed to parse SQL in response. e={e}"
         logger.warning(error_message)
@@ -82,27 +101,23 @@ def parse_sql_response(
         # update history with new SQL
         added_views = set()
         error_message = None
-        largest_k = max(sql_dict.keys(), key=lambda x: int(x[3:]))
-        for k, v in sql_dict.items():
-            view_table = database.get_table(k)
-            # If there is a new definition, then it's likely a reask and we should
-            # update
-            if view_table is not None and v == view_table.view_sql:
-                continue
-            else:
-                v = replace_tag_with_table(v)
-                v = database.normalize_query(v)
-                try:
-                    database.add_view(name=k, sql=v)
-                    added_views.add(k)
-                except Exception as e:
-                    error_message = f"Failed to add view to database. e={e}"
-                    logger.warning(error_message)
-                    # used to break out of try/except
-                    return  # type: ignore
+        k = max(sql_dict.keys(), key=lambda x: int(x[3:]))
+        v = sql_dict[k]
+        view_table = database.get_table(k)
+        # If there is a new definition, then it's likely a reask and we should
+        # update
+        if view_table is None or v != view_table.view_sql:
+            try:
+                database.add_view(name=k, sql=v, description=description)
+                added_views.add(k)
+            except Exception as e:
+                error_message = f"Failed to add view to database. e={e}"
+                logger.warning(error_message)
+                # used to break out of try/except
+                return  # type: ignore
         try:
             # get the last sql and return it fully parsed
-            last_sql = prettify_sql(database.get_table(largest_k).view_sql)
+            last_sql = prettify_sql(database.get_table(k).view_sql)
         except Exception as e:
             error_message = f"Failed to get last SQL from database. e={e}"
             logger.warning(error_message)
@@ -111,7 +126,11 @@ def parse_sql_response(
         try:
             last_sql_df = database.run_sql_to_df(last_sql).head(5)
         except Exception as e:
-            error_message = f"Failed to run SQL in DuckDB. e={e}"
+            # Extract error message alone to avoid views
+            err_msg = str(e).split(":", 1)[1]
+            if "SELECT" in err_msg:
+                print("Parsing failed")
+            error_message = f"Failed to run SQL in SQLite. e={err_msg.strip()}"
             logger.warning(error_message)
             # used to break out of try/except
             return  # type: ignore
@@ -172,6 +191,7 @@ class SQLGeneratorAgent(DataAgent):
                     llm_config=self._llm_config,
                     database=self._database,
                     execution_func=parse_sql_response,
+                    llm_callback=self._llm_callback,
                 )
             ]
 
@@ -183,7 +203,7 @@ class SQLGeneratorAgent(DataAgent):
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "Generates SQL queries based on given user instructions. The instructions should be detailed descriptions of what attributes, aggregates, and conditions are needed in the SQL query. The instructions should ask a concrete question that can be answered by a single query."
+        return "Generates a single SQL query based on the given user instruction. Each instruction should be a detailed description of what attributes, aggregates, filter conditions, tables, and joins are needed in the SQL query along with any custom functions that are needed (e.g. ROW_NUMBER, RANK, LAG, ...)."
 
     @property
     def llm_client(self) -> Client:
@@ -200,7 +220,9 @@ class SQLGeneratorAgent(DataAgent):
         """Get the system message."""
         serialized_schema = serialize_as_xml(self.database.tables)
         return self._system_prompt.format(
-            schema=serialized_schema, termination_message=Commands.END
+            schema=serialized_schema,
+            termination_message=Commands.END,
+            dialect="SQLite",
         )
 
     @property
@@ -245,6 +267,20 @@ class SQLGeneratorAgent(DataAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
+        # print(colored("SQL AGENT", "red"))
+        # print(self.system_message)
+        messages_start_idx = -1
+        while (
+            abs(messages_start_idx) <= len(messages)
+            and messages[messages_start_idx].is_error_message
+        ):
+            messages_start_idx -= 2
+        messages = messages[messages_start_idx:]
+        for msg in messages:
+            print(msg.role)
+            print(msg.content)
+        print("-------")
+        print("-------")
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -259,8 +295,10 @@ class SQLGeneratorAgent(DataAgent):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        # print("SQL AGENT CONTENT", content)
-        # print("*****")
+        if content.endswith("<end>") and "<sql" in content:
+            content = content.replace("<end>", "")
+        print("SQL AGENT CONTENT", content)
+        print("*****")
         return AgentMessage(
             role="assistant",
             content=content,
