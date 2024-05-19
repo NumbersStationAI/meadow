@@ -6,7 +6,11 @@ from typing import Callable
 from xml.etree import ElementTree
 
 from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
-from meadow.agent.data_agents.text2sql_utils import parse_sql_response, parse_sqls
+from meadow.agent.data_agents.text2sql_utils import (
+    parse_and_run_single_sql,
+    parse_sql_response,
+    parse_sqls,
+)
 from meadow.agent.exectors.reask import ReaskExecutorAgent
 from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
@@ -39,9 +43,7 @@ Given the user's input, provide the action you want to take. The user will provi
 
 def parse_plan(
     message: str,
-    agent_name: str,
-    database: Database,  # required for use in an executor
-) -> AgentMessage:
+) -> str:
     """Extract the plan from the response.
 
     Plan follows
@@ -53,48 +55,47 @@ def parse_plan(
     if "<step>" not in message:
         raise ValueError(f"Plan not found in the response. message={message}")
     inner_steps = re.search(r"(<step>.*</step>)", message, re.DOTALL).group(1)
-    try:
-        root = ElementTree.fromstring(inner_steps)  # Parse the XML string
-        for step in root:
-            action = (
-                step.find("action").text
-                if step.find("action") is not None
-                else "Unknown"
-            )
-            if action not in ["Query", "Edit"]:
-                raise ValueError(f"Unknown action {action}. Please use Query or Edit.")
-            input = (
-                step.find("input").text.strip()
-                if step.find("input") is not None
-                else "No input"
-            )
-            if action == "Edit":
-                input = f"<sql>/n{input}</sql>"
-    except ElementTree.ParseError as e:
-        error_message = f"Failed to parse the message as XML. e={e}"
-        raise ValueError(error_message)
-    return AgentMessage(
-        role="assistant",
-        content=input,
-        tool_calls=None,
-        generating_agent=agent_name,
-        requires_response=(action == "Query"),
+    pattern = re.compile(
+        r"<step>\s*<action>(.*?)</action>\s*<input>(.*?)</input>\s*</step>",
+        re.DOTALL,
     )
+    matches = pattern.findall(inner_steps)
+    if not matches:
+        raise ValueError(
+            "Failed to parse the message. Outputs needs to be in <step> tags."
+        )
+    action, input = matches[0]
+    if action not in ["Query", "Edit"]:
+        raise ValueError(f"Unknown action {action}. Please use Query or Edit.")
+    if action == "Edit":
+        input = f"<sql>{input}</sql>"
+    else:
+        # We use the existance of SQL tags in the next parser to determine if the action is
+        # one off Query for formal Edit
+        assert "<sql>" not in input, "Query action should not use <sql> tags"
+    return input
 
 
-def parse_sql_if_available(
+def parse_sql_of_a_type(
     message: str,
     agent_name: str,
     database: Database,  # required for use in an executor
 ) -> AgentMessage:
-    if "<sql>" in message:
-        return parse_sql_response(message, agent_name, database)
-    return AgentMessage(
-        role="assistant",
-        content=message,
-        tool_calls=None,
-        generating_agent=agent_name,
-    )
+    """Parse SQL depending on if Query or Edit"""
+    input = parse_plan(message)
+    if "<sql>" in input:
+        # Remove now stale view
+        print([tbl.name for tbl in database.tables])
+        view_name = f"sql{database.get_number_of_views()}"
+        database.remove_view(view_name)
+        print([tbl.name for tbl in database.tables])
+        return parse_sql_response(input, agent_name, database)
+    else:
+        response = parse_and_run_single_sql(input, agent_name, database)
+        # We know that a "Query" message requires a response from this agent
+        # as the query it help debug
+        response.requires_response = True
+        return response
 
 
 class EmptyResultExecutor(ExecutorAgent, LLMAgentWithExecutors):
@@ -129,19 +130,14 @@ class EmptyResultExecutor(ExecutorAgent, LLMAgentWithExecutors):
         self._role = AgentRole.EXECUTOR
 
         if self._executors is None:
+            # N.B. when an executor errors, it is that executor that gets resent a response
+            # from the supervisor. We don't go "up" the executor chain.
             self._executors = [
                 ReaskExecutorAgent(
                     client=None,
                     llm_config=None,
                     database=self._database,
-                    execution_func=parse_plan,
-                    llm_callback=self._llm_callback,
-                ),
-                ReaskExecutorAgent(
-                    client=None,
-                    llm_config=None,
-                    database=self._database,
-                    execution_func=parse_sql_if_available,
+                    execution_func=parse_sql_of_a_type,
                     llm_callback=self._llm_callback,
                 ),
             ]
@@ -161,6 +157,11 @@ class EmptyResultExecutor(ExecutorAgent, LLMAgentWithExecutors):
         return (
             "Executes responses and asks models why there are mistakes and how to fix."
         )
+
+    @property
+    def role(self) -> AgentRole:
+        """Get the role of the agent."""
+        return self._role
 
     @property
     def execution_func(self) -> Callable[[str, str, Database], AgentMessage]:
@@ -259,15 +260,14 @@ Here is the SQL query I have written:
 </sql>
 
 This SQL returned an empty result. Help me debug."""
-            parsed_response = AgentMessage(
-                role="assistant",
-                content=error_message,
-                requires_response=True,
-                generating_agent=self.name,
-            )
+            assert len(messages) == 1
+            messages[0].content = error_message
+            messages[0].display_content = error_message
+            return await self.generate_agent_reply(messages, sender)
         if self._current_execution_attempts >= self._max_execution_attempts:
             # This is the final response to the supervisor so set response to False
             parsed_response.requires_response = False
+            parsed_response.requires_execution = False
             return parsed_response
         self._current_execution_attempts += 1
         return parsed_response
@@ -279,10 +279,6 @@ This SQL returned an empty result. Help me debug."""
     ) -> AgentMessage:
         """Generate the reply when acting as an Agent of a chat."""
         # Use display content instead of content for agent chats for user
-        messages = [message.model_copy() for message in messages]
-        for message in messages:
-            if message.role == "user":
-                message.content = message.display_content
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -305,6 +301,7 @@ This SQL returned an empty result. Help me debug."""
             content=content,
             tool_calls=None,
             generating_agent=self.name,
+            requires_execution=True,
         )
 
     async def generate_reply(

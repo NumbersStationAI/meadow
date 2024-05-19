@@ -67,6 +67,18 @@ class SubTask:
         self.prompt = prompt
 
 
+def parse_steps(input_str: str) -> list[tuple[str, str]]:
+    """
+    Parse the given XML-like string and extract agent, instruction pairs using regular expressions.
+    """
+    pattern = re.compile(
+        r"<step\d*>\s*<agent>(.*?)</agent>\s*<instruction>(.*?)</instruction>\s*</step\d*>",
+        re.DOTALL,
+    )
+    matches = pattern.findall(input_str)
+    return [(agent.strip(), instruction.strip()) for agent, instruction in matches]
+
+
 def parse_plan(
     message: str,
     agent_name: str,
@@ -87,26 +99,14 @@ def parse_plan(
     if "<steps>" not in message:
         raise ValueError(f"Plan not found in the response. message={message}")
     inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
+    parsed_steps = parse_steps(inner_steps)
     plan: list[SubTaskForParse] = []
-    try:
-        root = ElementTree.fromstring(inner_steps)  # Parse the XML string
-        for step in root:
-            agent = (
-                step.find("agent").text if step.find("agent") is not None else "Unknown"
+    for agent, instruction in parsed_steps:
+        if agent not in available_agents:
+            raise ValueError(
+                f"Agent {agent} not found in available agents. Please only use {', '.join(available_agents.keys())}"
             )
-            if agent not in available_agents:
-                raise ValueError(
-                    f"Agent {agent} not found in available agents. Please only use {', '.join(available_agents.keys())}"
-                )
-            instruction = (
-                step.find("instruction").text.strip()
-                if step.find("instruction") is not None
-                else "No instruction"
-            )
-            plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
-    except ElementTree.ParseError as e:
-        error_message = f"Failed to parse the message as XML. e={e}"
-        raise ValueError(error_message)
+        plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
     return AgentMessage(
         role="assistant",
         content=json.dumps([m.model_dump() for m in plan]),

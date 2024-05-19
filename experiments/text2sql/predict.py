@@ -90,7 +90,7 @@ async def agenerate_sql(
                 all_prompts_to_save=all_prompts_to_save,
                 example_idx=i,
             )
-        elif text_to_sql.agent_type == "text2sql_with_plan":
+        elif text_to_sql.agent_type == "text2sql_with_planner":
             agent = get_text2sql_planner_agent(
                 user_agent=user_agent,
                 client=client,
@@ -208,7 +208,7 @@ def generate_sql(
                 last_sql_message = msg
                 break
         if last_sql_message is None:
-            print("DID NOT FIND SQL FOR", messages)
+            print("DID NOT FIND SQL FOR", [msg.content[:50] for msg in messages])
             sql = ""
             tbl = ""
         else:

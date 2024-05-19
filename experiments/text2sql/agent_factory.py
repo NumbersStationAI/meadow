@@ -355,8 +355,8 @@ def get_text2sql_llm_reask_agent(
     )
     llm_executor = [
         ReaskExecutorAgent(
-            client=client,
-            llm_config=llm_config,
+            client=None,
+            llm_config=None,
             database=database,
             system_prompt=SQL_EXECUTOR_PROMPT,
             execution_func=parse_sql_response,
@@ -367,7 +367,6 @@ def get_text2sql_llm_reask_agent(
             llm_config=llm_config,
             database=database,
             execution_func=check_empty_table,
-            reask_suffix=DEFAULT_REASK_SUFFIX,
             llm_callback=callback_empty,
         )
     ]
@@ -422,8 +421,8 @@ def get_text2sql_llm_reask_planner_agent(
     )
     llm_executor = [
         ReaskExecutorAgent(
-            client=client,
-            llm_config=llm_config,
+            client=None,
+            llm_config=None,
             database=database,
             system_prompt=SQL_EXECUTOR_PROMPT,
             execution_func=parse_sql_response,
@@ -434,7 +433,6 @@ def get_text2sql_llm_reask_planner_agent(
             llm_config=llm_config,
             database=database,
             execution_func=check_empty_table,
-            reask_suffix=DEFAULT_REASK_SUFFIX,
             llm_callback=callback_empty,
         )
     ]

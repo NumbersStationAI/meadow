@@ -141,9 +141,6 @@ class ReaskExecutorAgent(ExecutorAgent):
                 self.name,
                 self._database,
             )
-            assert (
-                not parsed_response.requires_response
-            ), "Executor must return termination message if successful parse."
         except Exception as e:
             parsed_response = AgentMessage(
                 role="assistant",

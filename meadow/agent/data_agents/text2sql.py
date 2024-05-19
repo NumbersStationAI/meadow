@@ -156,7 +156,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         )
         await self.send(reply, sender)
 
-    async def generate_executed_reply(
+    async def generate_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
@@ -200,12 +200,5 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
             content=content,
             tool_calls=None,
             generating_agent=self.name,
+            requires_execution=True,
         )
-
-    async def generate_reply(
-        self,
-        messages: list[AgentMessage],
-        sender: Agent,
-    ) -> AgentMessage:
-        """Generate a reply based on the received messages."""
-        return await self.generate_executed_reply(messages, sender)

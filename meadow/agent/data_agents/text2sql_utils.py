@@ -132,6 +132,29 @@ def parse_sql_response(
     )
 
 
+def parse_and_run_single_sql(
+    sql: str, agent_name: str, database: Database
+) -> AgentMessage:
+    """Generate a parsed response from the SQL query."""
+    print("CONTENT PARSE SIMPLE", sql)
+    sql = prettify_sql(sql.strip())
+    try:
+        df = database.run_sql_to_df(sql).head(5)
+    except Exception as e:
+        # Extract error message alone to avoid views
+        err_msg = str(e).split(":", 1)[1]
+        if "SELECT" in err_msg:
+            print("Parsing failed")
+        error_message = f"Failed to run SQL in SQLite. e={err_msg.strip()}"
+        logger.warning(error_message)
+    return AgentMessage(
+        role="assistant",
+        content=f"SQL:{sql}\bData:\n{df.to_string()}",
+        tool_calls=None,
+        generating_agent=agent_name,
+    )
+
+
 def check_empty_table(
     content: str, agent_name: str, database: Database
 ) -> AgentMessage:

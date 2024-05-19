@@ -53,6 +53,7 @@ class ControllerAgent(Agent):
 
     def set_current_agent(self, agent: Agent) -> None:
         """Set the current task agent."""
+        print("SWAPPING", agent)
         self._current_agent = agent
 
     def set_current_task_agent(self, agent: Agent) -> None:
@@ -163,31 +164,36 @@ class ControllerAgent(Agent):
         )
         last_message = messages[-1]
         print("IN EXECUTOR REPLY", self._agent_executors.get(sender, []))
-        for executor in self._agent_executors.get(sender, []):
-            # Generate a new chat between sender and executor
-            sub_controller = ControllerAgent(
-                supervisor=sender,
-                # Very simply planner that always sends instruction to executor
-                # in a single step.
-                planner=PlannerAgent(
-                    available_agents=[executor],
-                    client=None,
-                    llm_config=None,
-                    database=None,
-                ),
-                supervisor_auto_respond=True,
-                silent=self._silent,
-            )
-            sender.set_chat_role(AgentRole.SUPERVISOR)
-            sender._messages._history[sub_controller] = [
-                msg.model_copy() for msg in sender._messages._history[self]
-            ]
-            sub_controller._messages._history[sender] = [
-                msg.model_copy() for msg in self._messages._history[sender]
-            ]
-            executor_response = await sub_controller.initiate_chat(last_message.content)
-            last_message = executor_response.model_copy()
-            sender.set_chat_role(AgentRole.EXECUTOR)
+        if messages[-1].requires_execution and self._agent_executors.get(sender, []):
+            for executor in self._agent_executors.get(sender, []):
+                # Generate a new chat between sender and executor
+                sub_controller = ControllerAgent(
+                    supervisor=sender,
+                    # Very simply planner that always sends instruction to executor
+                    # in a single step.
+                    planner=PlannerAgent(
+                        available_agents=[executor],
+                        client=None,
+                        llm_config=None,
+                        database=None,
+                    ),
+                    supervisor_auto_respond=True,
+                    silent=self._silent,
+                )
+                print("SENDER TO CHANGE TO SUPERVISOR", sender)
+                sender.set_chat_role(AgentRole.SUPERVISOR)
+                sender._messages._history[sub_controller] = [
+                    msg.model_copy() for msg in sender._messages._history[self]
+                ]
+                sub_controller._messages._history[sender] = [
+                    msg.model_copy() for msg in self._messages._history[sender]
+                ]
+                executor_response = await sub_controller.initiate_chat(
+                    last_message.content
+                )
+                last_message = executor_response.model_copy()
+                print("SENDER TO CHANGE TO EXEC", sender)
+                sender.set_chat_role(AgentRole.EXECUTOR)
         final_response = last_message or default_response
         # The current_task_agent is the agent of the task that is currently answering the user's
         # question. current_agent is whoever we last chatted with. When a user responds, current_agent

@@ -48,6 +48,9 @@ class AgentMessage(ChatMessage):
     won't fire."""
     requires_response: bool = False
 
+    """If message requires being sent to the agent's executors."""
+    requires_execution: bool = False
+
     creation_time: datetime = datetime.now()
 
     @model_validator(mode="after")
