@@ -3,7 +3,7 @@
 import logging
 from typing import Callable
 
-from meadow.agent.agent import Agent, ExecutorAgent, LLMAgent
+from meadow.agent.agent import Agent, ExecutorAgent
 from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
     generate_llm_reply,
@@ -27,7 +27,7 @@ Given the user's message below, please explain the error and hypothesis how to f
 ERROR_MESSAGE = """I'm sorry, I'm having a hard time running. Please try to rephrase."""
 
 
-class DefaultExecutorAgent(ExecutorAgent, LLMAgent):
+class ReaskExecutorAgent(ExecutorAgent):
     """Agent that execute/validates a response given an execution function."""
 
     def __init__(
@@ -38,6 +38,7 @@ class DefaultExecutorAgent(ExecutorAgent, LLMAgent):
         execution_func: Callable[[str, str, Database], AgentMessage],
         max_execution_attempts: int = 2,
         system_prompt: str = DEFAULT_EXECUTOR_PROMPT,
+        reask_suffix: str = "\n\nPlease fix.",
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -50,6 +51,7 @@ class DefaultExecutorAgent(ExecutorAgent, LLMAgent):
         self._max_execution_attempts = max_execution_attempts
         self._current_execution_attempts = 0
         self._system_prompt = system_prompt
+        self._reask_suffix = reask_suffix
         self._messages = MessageHistory()
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
@@ -58,7 +60,7 @@ class DefaultExecutorAgent(ExecutorAgent, LLMAgent):
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "Executor"
+        return f"{self._execution_func.__name__}_Executor"
 
     @property
     def description(self) -> str:
@@ -71,10 +73,6 @@ class DefaultExecutorAgent(ExecutorAgent, LLMAgent):
     def execution_func(self) -> Callable[[str, str, Database], AgentMessage]:
         """The execution function of this agent."""
         return self._execution_func
-
-    @property
-    def executors(self) -> list[ExecutorAgent] | None:
-        return []
 
     @property
     def llm_client(self) -> Client:
@@ -132,6 +130,7 @@ class DefaultExecutorAgent(ExecutorAgent, LLMAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
+        print(self.execution_func)
         if self.execution_func is None:
             raise ValueError(
                 "Execution function is not set. Executor must have an execution function."
@@ -142,20 +141,23 @@ class DefaultExecutorAgent(ExecutorAgent, LLMAgent):
                 self.name,
                 self._database,
             )
+            assert (
+                not parsed_response.requires_response
+            ), "Executor must return termination message if successful parse."
         except Exception as e:
             parsed_response = AgentMessage(
                 role="assistant",
-                content=str(e) + "\n\nPlease fix.",
-                is_error_message=True,
+                content=str(e) + self._reask_suffix,
+                requires_response=True,
                 generating_agent=self.name,
             )
         if self._current_execution_attempts >= self._max_execution_attempts:
-            # Do not set as error message because this is the final response to the user
-            parsed_response.is_error_message = False
+            # This is the final response to the supervisor so set response to False
+            parsed_response.requires_response = False
             return parsed_response
         self._current_execution_attempts += 1
         # The validator w/ LLM client will summarize error and ask for help
-        if self.llm_client is not None and parsed_response.is_error_message:
+        if self.llm_client is not None and parsed_response.requires_response:
             # Executors are a bit weird in that they are going to generate an "assistant" message
             # given the output of an execution. The last role of messages in `user`. However,
             # we need to add the error in the executor and then generate the `assistant` response.
@@ -184,7 +186,7 @@ class DefaultExecutorAgent(ExecutorAgent, LLMAgent):
             return AgentMessage(
                 role="assistant",
                 content=content,
-                is_error_message=True,
+                requires_response=True,
                 generating_agent=self.name,
             )
         else:

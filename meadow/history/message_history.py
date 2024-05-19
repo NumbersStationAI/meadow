@@ -23,6 +23,7 @@ class MessageHistory:
         # make a copy of the message to avoid modifying the original
         message = message.model_copy()
         message.role = role
+        # message.creation_time = datetime.now()
         self._history[agent].append(message)
 
     def get_messages(
@@ -59,3 +60,11 @@ class MessageHistory:
     def get_all_messages(self) -> dict[Agent, list[AgentMessage]]:
         """Get all messages in the history."""
         return self._history
+
+    def get_messages_linearly_by_time(self) -> list[AgentMessage]:
+        """Get all messages in the history linearly by time."""
+        all_messages: list[AgentMessage] = []
+        for messages in self._history.values():
+            all_messages.extend(messages)
+        all_messages.sort(key=lambda x: x.creation_time)
+        return all_messages

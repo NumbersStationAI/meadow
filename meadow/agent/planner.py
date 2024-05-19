@@ -4,14 +4,15 @@ import json
 import logging
 import re
 import xml.etree.ElementTree as ElementTree
-from functools import partial
 from queue import Queue
 from typing import Callable
 
 from pydantic import BaseModel
 
-from meadow.agent.agent import Agent, ExecutorAgent, LLMAgent
-from meadow.agent.executor import DefaultExecutorAgent
+from meadow.agent.agent import (
+    Agent,
+    LLMAgent,
+)
 from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.utils import (
     generate_llm_reply,
@@ -69,7 +70,7 @@ class SubTask:
 def parse_plan(
     message: str,
     agent_name: str,
-    database: Database,
+    database: Database,  # required for use in an executor
     available_agents: dict[str, Agent],
 ) -> AgentMessage:
     """Extract the plan from the response.
@@ -112,6 +113,7 @@ def parse_plan(
         display_content=inner_steps,
         tool_calls=None,
         generating_agent=agent_name,
+        requires_response=False,
     )
 
 
@@ -121,10 +123,9 @@ class PlannerAgent(LLMAgent):
     def __init__(
         self,
         available_agents: list[Agent],
-        client: Client,
-        llm_config: LLMConfig,
+        client: Client | None,
+        llm_config: LLMConfig | None,
         database: Database | None,
-        executors: list[ExecutorAgent] = None,
         system_prompt: str = DEFAULT_PLANNER_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -135,7 +136,6 @@ class PlannerAgent(LLMAgent):
         self._client = client
         self._llm_config = llm_config
         self._database = database
-        self._executors = executors
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
         self._plan: Queue[SubTask] = Queue()
@@ -143,18 +143,18 @@ class PlannerAgent(LLMAgent):
         self._llm_callback = llm_callback
         self._silent = silent
 
-        # Override with defaults
-        if self._executors is None:
-            self._executors = [
-                DefaultExecutorAgent(
-                    client=self._client,
-                    llm_config=self._llm_config,
-                    database=self._database,
-                    execution_func=partial(
-                        parse_plan, available_agents=self._available_agents
-                    ),
-                )
-            ]
+        # # Override with defaults
+        # if self._executors is None:
+        #     self._executors = [
+        #         ReaskExecutorAgent(
+        #             client=self._client,
+        #             llm_config=self._llm_config,
+        #             database=self._database,
+        #             execution_func=partial(
+        #                 parse_plan, available_agents=self._available_agents
+        #             ),
+        #         )
+        #     ]
 
     @property
     def name(self) -> str:
@@ -189,11 +189,6 @@ class PlannerAgent(LLMAgent):
                 ]
             ),
         )
-
-    @property
-    def executors(self) -> list[ExecutorAgent] | None:
-        """The executor agents that should be used by this agent."""
-        return self._executors
 
     def has_plan(self) -> bool:
         """Check if the agent has a plan."""
@@ -282,8 +277,6 @@ class PlannerAgent(LLMAgent):
                     is_termination_message=True,
                 )
             else:
-                # Try to parse the plan. If it fails, that's okay. The error will be caught by
-                # the executor and we will hit the parsing plan option again.
                 display_content = None
                 try:
                     parsed_plan_message = parse_plan(
@@ -305,7 +298,7 @@ class PlannerAgent(LLMAgent):
                     logger.warning(
                         f"Error in parsing plan. Ignoring as executor should throw error back to fix. e={e}, message={content}."
                     )
-                    pass
+                    raise e
                 return AgentMessage(
                     role="assistant",
                     content=content,

@@ -30,15 +30,8 @@ class EvalUserAgent(UserAgent):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply."""
-        if Commands.has_end(messages[-1].content):
-            return AgentMessage(
-                role="assistant",
-                content="Goodbye!",
-                generating_agent=self.name,
-                is_termination_message=True,
-            )
         return AgentMessage(
             role="assistant",
-            content="<next>",
+            content=Commands.NEXT,
             generating_agent=self.name,
         )

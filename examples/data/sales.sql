@@ -81,7 +81,6 @@ CREATE TABLE suppliers (
 );
 
 -- Inserting sample data into 'suppliers'
-
 INSERT INTO suppliers (supplier_id, name, contact_name, address, city, state, zip_code) VALUES
 (1, 'Quality Goods', 'Tom Hardy', '1234 Pine St', 'Los Angeles', 'CA', '90001'),
 (2, 'Tech Supplies', 'Nina Morris', '2345 Oak St', 'New York', 'NY', '10001'),
@@ -116,7 +115,6 @@ CREATE TABLE products (
 );
 
 -- Inserting sample data into 'products'
-
 INSERT INTO products (product_id, name, category, description, price, supplier_id) VALUES
 (1, 'Laptop', 'Electronics', 'High performance laptop for gaming and professional use', 1200.00, 2),
 (2, 'Desktop Computer', 'Electronics', 'Reliable and powerful office computer', 800.00, 2),
@@ -148,7 +146,6 @@ CREATE TABLE orders (
 );
 
 -- Inserting sample data into 'orders'
-
 INSERT INTO orders (order_id, customer_id, order_date) VALUES
 (1, 1, '2023-04-01'),
 (2, 1, '2023-04-03'),
@@ -191,7 +188,6 @@ CREATE TABLE order_items (
 );
 
 -- Inserting sample data into 'order_items'
-
 INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES
 (1, 1, 1, 1200.00),
 (1, 3, 2, 140.00),

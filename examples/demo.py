@@ -1,11 +1,13 @@
 import argparse
 import asyncio
+import sys
 
 from meadow import Client
 from meadow.agent.agent import Agent
 from meadow.agent.controller import ControllerAgent
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent, parse_sql_response
-from meadow.agent.executor import DefaultExecutorAgent
+from meadow.agent.data_agents.text2sql_utils import check_empty_table
+from meadow.agent.exectors.reask import ReaskExecutorAgent
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
 from meadow.cache import DuckDBCache
@@ -15,8 +17,6 @@ from meadow.client.schema import LLMConfig
 from meadow.database.connector.duckdb import DuckDBConnector
 from meadow.database.connector.sqlite import SQLiteConnector
 from meadow.database.database import Database
-
-import sys
 
 sys.path.append("/home/lorr1/projects/code/meadow/experiments/text2sql")
 from eval_user import EvalUserAgent
@@ -37,13 +37,20 @@ def get_simple_text2sql_agent(
         llm_config=llm_config,
         database=database,
         executors=[
-            DefaultExecutorAgent(
+            ReaskExecutorAgent(
                 client=None,
                 llm_config=llm_config,
                 database=database,
                 execution_func=parse_sql_response,
                 max_execution_attempts=0,
-            )
+            ),
+            ReaskExecutorAgent(
+                client=None,
+                llm_config=None,
+                database=database,
+                execution_func=check_empty_table,
+                max_execution_attempts=0,
+            ),
         ],
         system_prompt=SIMPLE_SQL_PROMPT,
         overwrite_cache=overwrite_cache,
@@ -55,7 +62,7 @@ def get_simple_text2sql_agent(
         database=database,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
     return controller
 
 
@@ -72,15 +79,6 @@ def get_full_text2sql_agent(
         client=client,
         llm_config=llm_config,
         database=database,
-        executors=[
-            DefaultExecutorAgent(
-                client=None,
-                llm_config=llm_config,
-                database=database,
-                execution_func=parse_sql_response,
-                max_execution_attempts=2,
-            )
-        ],
         overwrite_cache=overwrite_cache,
     )
     planner = PlannerAgent(
@@ -90,7 +88,7 @@ def get_full_text2sql_agent(
         database=database,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
     return controller
 
 

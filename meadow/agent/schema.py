@@ -1,5 +1,6 @@
 """Agent schema classes."""
 
+from datetime import datetime
 import logging
 from typing import Any, Callable
 
@@ -41,10 +42,13 @@ class AgentMessage(ChatMessage):
 
     generating_agent: str
 
-    """Error message used when messaging the validators."""
-    is_error_message: bool = False
-
     is_termination_message: bool = False
+
+    """Does the message require an explicit response. If so, auto-response
+    won't fire."""
+    requires_response: bool = False
+
+    creation_time: datetime = datetime.now()
 
     @model_validator(mode="after")
     def set_default_second_attr(self) -> "AgentMessage":

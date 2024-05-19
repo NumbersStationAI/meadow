@@ -1,9 +1,17 @@
+import enum
 from abc import abstractmethod
 from typing import Callable
 
 from meadow.agent.schema import AgentMessage
 from meadow.client.client import Client
 from meadow.database.database import Database
+
+
+class AgentRole(enum.Enum):
+    """Agent role."""
+
+    SUPERVISOR = enum.auto()
+    EXECUTOR = enum.auto()
 
 
 class Agent:
@@ -26,6 +34,12 @@ class Agent:
     def executors(self) -> list["ExecutorAgent"] | None:
         """The executors of the agent."""
         return None
+
+    def set_chat_role(self, role: AgentRole) -> None:
+        """Set the chat role of the agent.
+
+        Only used for agents that have executors."""
+        return
 
     @abstractmethod
     async def send(
@@ -62,7 +76,22 @@ class LLMAgent(Agent):
         """The LLM client of this agent."""
 
 
-class ExecutorAgent:
+class LLMAgentWithExecutors(LLMAgent):
+    """LLM agent with executors."""
+
+    @property
+    def executors(self) -> list["ExecutorAgent"] | None:
+        """The executors of the agent."""
+        raise NotImplementedError
+
+    def set_chat_role(self, role: AgentRole) -> None:
+        """Set the chat role of the agent.
+
+        Only used for agents that have executors."""
+        raise NotImplementedError
+
+
+class ExecutorAgent(LLMAgent):
     """Execution agent that execute/validates a response given an execution function."""
 
     @property
@@ -74,22 +103,4 @@ class ExecutorAgent:
     @abstractmethod
     def reset_execution_attempts(self) -> None:
         """Reset the number of execution attempts."""
-        ...
-
-    @abstractmethod
-    async def generate_reply(
-        self,
-        messages: list[AgentMessage],
-        sender: Agent,
-    ) -> AgentMessage:
-        """Generate a reply based on the received messages."""
-
-
-class DataAgent(LLMAgent):
-    """Agent for data tasks."""
-
-    @property
-    @abstractmethod
-    def database(self) -> Database:
-        """The database used by the agent."""
         ...

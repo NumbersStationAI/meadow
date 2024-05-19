@@ -4,8 +4,10 @@ from pydantic import BaseModel
 
 from meadow.agent.agent import Agent
 from meadow.agent.controller import ControllerAgent
-from meadow.agent.data_agents.text2sql import SQLGeneratorAgent, parse_sql_response
-from meadow.agent.executor import DefaultExecutorAgent, ExecutorAgent
+from meadow.agent.data_agents.text2sql import DEFAULT_REASK_SUFFIX, SQLGeneratorAgent, parse_sql_response
+from meadow.agent.data_agents.text2sql_utils import check_empty_table
+from meadow.agent.exectors.empty_result import EmptyResultExecutor
+from meadow.agent.exectors.reask import ReaskExecutorAgent, ExecutorAgent
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
 from meadow.client.client import Client
@@ -119,11 +121,20 @@ def get_simple_text2sql_agent(
         llm_config=llm_config,
         database=database,
         executors=[
-            DefaultExecutorAgent(
+            ReaskExecutorAgent(
                 client=None,
                 llm_config=llm_config,
                 database=database,
                 execution_func=parse_sql_response,
+                reask_suffix=DEFAULT_REASK_SUFFIX,
+                max_execution_attempts=0,
+            ),
+            ReaskExecutorAgent(
+                client=None,
+                llm_config=None,
+                database=database,
+                execution_func=check_empty_table,
+                reask_suffix=DEFAULT_REASK_SUFFIX,
                 max_execution_attempts=0,
             )
         ],
@@ -139,7 +150,7 @@ def get_simple_text2sql_agent(
         system_prompt=SQL_PLANNER_PROMPT,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
     return controller
 
 
@@ -169,11 +180,20 @@ def get_text2sql_planner_agent(
         llm_config=llm_config,
         database=database,
         executors=[
-            DefaultExecutorAgent(
+            ReaskExecutorAgent(
                 client=None,
                 llm_config=llm_config,
                 database=database,
                 execution_func=parse_sql_response,
+                reask_suffix=DEFAULT_REASK_SUFFIX,
+                max_execution_attempts=0,
+            ),
+            ReaskExecutorAgent(
+                client=None,
+                llm_config=None,
+                database=database,
+                execution_func=check_empty_table,
+                reask_suffix=DEFAULT_REASK_SUFFIX,
                 max_execution_attempts=0,
             )
         ],
@@ -189,7 +209,7 @@ def get_text2sql_planner_agent(
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )
-    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
     return controller
 
 
@@ -213,11 +233,19 @@ def get_text2sql_simple_reask_agent(
     )
     # Have to build custom executor that doesn't use LLM
     no_llm_executor = [
-        DefaultExecutorAgent(
+        ReaskExecutorAgent(
             client=None,
             llm_config=None,
             database=database,
             execution_func=parse_sql_response,
+            reask_suffix=DEFAULT_REASK_SUFFIX,
+        ),
+        ReaskExecutorAgent(
+            client=None,
+            llm_config=None,
+            database=database,
+            execution_func=check_empty_table,
+            reask_suffix=DEFAULT_REASK_SUFFIX,
         )
     ]
     text2sql = SQLGeneratorAgent(
@@ -237,7 +265,7 @@ def get_text2sql_simple_reask_agent(
         system_prompt=SQL_PLANNER_PROMPT,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
     return controller
 
 
@@ -264,11 +292,19 @@ def get_text2sql_simple_reask_planner_agent(
     )
     # Have to build custom executor that doesn't use LLM
     no_llm_executor = [
-        DefaultExecutorAgent(
+        ReaskExecutorAgent(
             client=None,
             llm_config=None,
             database=database,
             execution_func=parse_sql_response,
+            reask_suffix=DEFAULT_REASK_SUFFIX,
+        ),
+        ReaskExecutorAgent(
+            client=None,
+            llm_config=None,
+            database=database,
+            execution_func=check_empty_table,
+            reask_suffix=DEFAULT_REASK_SUFFIX,
         )
     ]
     text2sql = SQLGeneratorAgent(
@@ -288,7 +324,7 @@ def get_text2sql_simple_reask_planner_agent(
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )
-    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
     return controller
 
 
@@ -310,13 +346,29 @@ def get_text2sql_llm_reask_agent(
         "SQLGeneratorAgent",
         all_prompts_to_save,
     )
+    callback_empty = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "EmptyResultExecutor",
+        all_prompts_to_save,
+    )
     llm_executor = [
-        DefaultExecutorAgent(
+        ReaskExecutorAgent(
             client=client,
             llm_config=llm_config,
             database=database,
             system_prompt=SQL_EXECUTOR_PROMPT,
             execution_func=parse_sql_response,
+            reask_suffix=DEFAULT_REASK_SUFFIX,
+        ),
+        EmptyResultExecutor(
+            client=client,
+            llm_config=llm_config,
+            database=database,
+            execution_func=check_empty_table,
+            reask_suffix=DEFAULT_REASK_SUFFIX,
+            llm_callback=callback_empty,
         )
     ]
     text2sql = SQLGeneratorAgent(
@@ -336,7 +388,7 @@ def get_text2sql_llm_reask_agent(
         system_prompt=SQL_PLANNER_PROMPT,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
     return controller
 
 
@@ -358,16 +410,32 @@ def get_text2sql_llm_reask_planner_agent(
         "SQLGeneratorAgent",
         all_prompts_to_save,
     )
+    callback_empty = lambda model_messages, chat_response: model_callback(
+        model_messages,
+        chat_response,
+        example_idx,
+        "EmptyResultExecutor",
+        all_prompts_to_save,
+    )
     callback_planner = lambda model_messages, chat_response: model_callback(
         model_messages, chat_response, example_idx, "PlannerAgent", all_prompts_to_save
     )
     llm_executor = [
-        DefaultExecutorAgent(
+        ReaskExecutorAgent(
             client=client,
             llm_config=llm_config,
             database=database,
             system_prompt=SQL_EXECUTOR_PROMPT,
             execution_func=parse_sql_response,
+            reask_suffix=DEFAULT_REASK_SUFFIX,
+        ),
+        EmptyResultExecutor(
+            client=client,
+            llm_config=llm_config,
+            database=database,
+            execution_func=check_empty_table,
+            reask_suffix=DEFAULT_REASK_SUFFIX,
+            llm_callback=callback_empty,
         )
     ]
     text2sql = SQLGeneratorAgent(
@@ -375,7 +443,6 @@ def get_text2sql_llm_reask_planner_agent(
         llm_config=llm_config,
         database=database,
         executors=llm_executor,
-        system_prompt=SIMPLE_SQL_PROMPT,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -388,5 +455,5 @@ def get_text2sql_llm_reask_planner_agent(
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )
-    controller = ControllerAgent(user=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
     return controller

@@ -4,7 +4,7 @@ import pandas as pd
 import sqlglot
 from sqlglot.optimizer.eliminate_ctes import eliminate_ctes
 
-from meadow.database.connector.connector import Connector, Table, Column
+from meadow.database.connector.connector import Column, Connector, Table
 
 logger = logging.getLogger(__name__)
 

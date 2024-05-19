@@ -169,7 +169,7 @@ def generate_sql(
     """Ask agent to generate SQL."""
     # Batch inputs for asyncio
     # REMOVE ME
-    # text_to_sql_in = text_to_sql_in[3:4]
+    # text_to_sql_in = text_to_sql_in[0:1]
     text_to_sql_in_batches = [
         text_to_sql_in[i : i + async_batch_size]
         for i in range(0, len(text_to_sql_in), async_batch_size)
@@ -208,7 +208,7 @@ def generate_sql(
                 last_sql_message = msg
                 break
         if last_sql_message is None:
-            print("DID NOT FIND SQL FOR", msg.content)
+            print("DID NOT FIND SQL FOR", messages)
             sql = ""
             tbl = ""
         else:
