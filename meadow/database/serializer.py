@@ -50,23 +50,26 @@ def serialize_as_list(
         serialized_table = f"# {table.name}("
         serialized_table += ", ".join([column.name for column in table.columns])
         serialized_table += ")"
-        if add_constraints:
-            for column in table.columns:
-                # if column.primary_key:
-                #     serialized_table += f"\n#    PRIMARY KEY({column.name})"
-                if column.foreign_keys:
-                    for fk_table, fk_column in column.foreign_keys:
-                        serialized_table += f"\n#    FOREIGN KEY({column.name}) REFERENCES {fk_table}({fk_column})"
-        if add_data and table.data:
-            df = pd.DataFrame(table.data)
-            serialized_table += "\n#    Data:"
-            table_lines = df.to_string().split("\n")
-            serialized_table += "\n#    " + "\n#    ".join(table_lines)
         if table.description:
             serialized_table += f": {table.description}"
         if table.view_sql:
             view_sql_lines = table.view_sql.split("\n")
             view_sql = "\n#    ".join(view_sql_lines)
             serialized_table += f"\n#    ```sql\n#    {view_sql}\n#    ```"
+        if add_data and table.data:
+            df = pd.DataFrame(table.data)
+            serialized_table += "\n#    Data:"
+            table_lines = df.to_string().split("\n")
+            serialized_table += "\n#    " + "\n#    ".join(table_lines)
+        if add_constraints:
+            join_str = ""
+            for column in table.columns:
+                # if column.primary_key:
+                #     serialized_table += f"\n#    PRIMARY KEY({column.name})"
+                if column.foreign_keys:
+                    for fk_table, fk_column in column.foreign_keys:
+                        join_str += f"\n#    {table.name}.{column.name} = {fk_table}.{fk_column}"
+            if join_str:
+                serialized_table += "\n#    Joins:" + join_str
         serialized_tables.append(serialized_table)
     return "\n".join(serialized_tables)

@@ -21,16 +21,15 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQL_PROMPT = """You generate {dialect} SQL queries and are a {dialect} expert. Given the table schema and user's question, generate a {dialect} SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
+DEFAULT_SQL_PROMPT = """You generate SQLite SQL queries and are a SQLite expert. Given the table schema and user's question, generate a SQLite SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
 
 1. Feel free to think through what you need to do first.
-2. Use <description></description> tags for a one sentence description of what the table captures. Be concise.
-3. Use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
-4. If the user responds back at some point with a message that indicates the user is satisfied with the SQL (e.g. "looks good" or "continue to next step"), response ONLY with {termination_message} tags. They should NEVER be used in conjunction with <sql> or other tags.
+2. Use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
+3. Then <description></description> tags for a one sentence description of what the SQL query captures. Be concise.
+4. Please use `FROM sqlXXX` to refer to the SQL query number XXX in the prompt. For example, if sql2 is in the schema from a prior step, please use `FROM sql2` to refer to that query.
 
 The user's schema is:
-{schema}
-"""
+{schema}"""
 
 
 class SQLGeneratorAgent(LLMAgentWithExecutors):

@@ -148,9 +148,6 @@ def compare_pred_ref(
     if not row_order_matters:
         pred_df_to_compare = pred_df_to_compare.sort_values(by=pred_cols_mapped)
         ref_df = ref_df.sort_values(by=ref_df.columns.tolist())
-    # print(pred_df_to_compare)
-    # print()
-    # print(ref_df)
     total_scores = []
     for ref_col_name in ref_df.columns:
         ref_col = ref_df[ref_col_name].tolist()
@@ -160,10 +157,13 @@ def compare_pred_ref(
         else:
             pred_col = pred_df_to_compare[pred_col_name].tolist()
         # Compare the column values
-        similarity = textdistance.levenshtein.similarity(ref_col, pred_col)
-        score = (similarity / max(len(ref_col), len(pred_col)))
+        # Have special case for when both tables are empty
+        if ref_col == [] and pred_col == []:
+            similarity = 1
+        else:
+            similarity = textdistance.levenshtein.similarity(ref_col, pred_col)
+        score = (similarity / max(len(ref_col), len(pred_col), 1))
         total_scores.append(score)
-    # print(total_scores)
     return sum(total_scores) / len(total_scores)
 
 
@@ -175,9 +175,7 @@ def execution_accuracy(
 ) -> tuple[float, float]:
     """Evaluate execution accuracy for one example."""
     final_score = 0
-    if "2014" in gold:
-        print("HERE")
-    if "Level_of_membership  >  4" in gold:
+    if "5000" in gold:
         print("HERE")
     assert gold, "Gold SQL is empty"
     if not pred:

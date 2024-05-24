@@ -15,16 +15,6 @@ from meadow.database.database import Database
 
 logger = logging.getLogger(__name__)
 
-SQL_PROMPT_WITH_PLANNER = """You generate SQLite SQL queries and are a SQLite expert. Given the table schema and user's question, generate a SQLite SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
-
-1. Feel free to think through what you need to do first.
-2. First use <description></description> tags for a one sentence description of what the table captures. Be concise.
-3. Then <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
-4. Please use `FROM sqlXXX` to refer to the SQL query number XXX in the prompt. For example, if sql2 is in the schema from a prior step, please use `FROM sql2` to refer to that query.
-
-The user's schema is:
-{schema}"""
-
 # SQL_PLANNER_PROMPT = """The user wants to answer an analytics question in SQL based on the following schema.
 
 # {serialized_schema}
@@ -71,8 +61,7 @@ For each SQL in the sequence, indicate which agents should perform the task and 
 ...
 </steps>
 
-The user's schema is below.
-
+Below is the data schema the user is working with.
 {serialized_schema}
 
 Please keep the plan simple and use as few steps as possible. Be very explicit about which columns should be selected at the end. Only select exactly what the user asks and nothing more."""
@@ -152,7 +141,6 @@ def get_simple_text2sql_agent(
                 max_execution_attempts=0,
             ),
         ],
-        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback,
     )
@@ -201,7 +189,6 @@ def get_text2sql_planner_agent(
                 max_execution_attempts=0,
             ),
         ],
-        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -249,7 +236,6 @@ def get_text2sql_simple_reask_agent(
         llm_config=llm_config,
         database=database,
         executors=no_llm_executor,
-        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -299,7 +285,6 @@ def get_text2sql_simple_reask_planner_agent(
         llm_config=llm_config,
         database=database,
         executors=no_llm_executor,
-        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -359,7 +344,6 @@ def get_text2sql_llm_reask_agent(
         llm_config=llm_config,
         database=database,
         executors=llm_executor,
-        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -421,7 +405,6 @@ def get_text2sql_llm_reask_planner_agent(
         llm_config=llm_config,
         database=database,
         executors=llm_executor,
-        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )

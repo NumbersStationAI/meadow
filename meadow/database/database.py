@@ -140,6 +140,7 @@ class Database:
             )
         # Try to mine for columns from the sql
         estimated_columns = None
+        df = None
         try:
             df = self.run_sql_to_df(sql)
             estimated_columns = extract_columns_from_df(df)
@@ -153,6 +154,7 @@ class Database:
             is_view=True,
             is_draft=True,
             columns=estimated_columns,
+            data=df.head(5).to_dict(orient="records") if df is not None else None,
             view_sql=sql,
         )
 

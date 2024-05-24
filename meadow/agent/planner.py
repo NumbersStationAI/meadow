@@ -13,6 +13,7 @@ from meadow.agent.agent import (
     Agent,
     LLMAgent,
 )
+from meadow.agent.data_agents.attribute_detector import AttributeDetectorAgent
 from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.utils import (
     generate_llm_reply,
@@ -40,7 +41,10 @@ DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the use
 </steps>
 
 If the user responds back at some point with a message that indicates the user is satisfied with the plan, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
+
+Below is the data schema the user is working with.
 {serialized_schema}
+
 Below are the agents you have access to.
 
 <agents>
@@ -144,7 +148,11 @@ class PlannerAgent(LLMAgent):
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
-
+        self._attribute_agent = AttributeDetectorAgent(
+            client=self._client,
+            llm_config=self._llm_config,
+            database=self._database,
+        )
         # # Override with defaults
         # if self._executors is None:
         #     self._executors = [
@@ -178,7 +186,6 @@ class PlannerAgent(LLMAgent):
         """Get the system message."""
         if self._database is not None:
             serialized_schema = serialize_as_list(self._database.tables)
-            serialized_schema = f"\nBelow is the data schema the user is working with.\n{serialized_schema}\n"
         else:
             serialized_schema = ""
         return self._system_prompt.format(
@@ -236,10 +243,10 @@ class PlannerAgent(LLMAgent):
             )
         # update the message history
         # TODO: refactor this formatting
-        if len(self._messages.get_messages(sender)) == 0:
-            message.content = f"<objective>{message.content}</objective>"
-        else:
-            message.content = f"<feedback>{message.content}</feedback>"
+        # if len(self._messages.get_messages(sender)) == 0:
+        #     message.content = f"<objective>{message.content}</objective>"
+        # else:
+        #     message.content = f"<feedback>{message.content}</feedback>"
         self._messages.add_message(agent=sender, role="user", message=message)
 
         reply = await self.generate_reply(
@@ -256,7 +263,7 @@ class PlannerAgent(LLMAgent):
         if self.llm_client is not None:
             chat_response = await generate_llm_reply(
                 client=self.llm_client,
-                messages=messages,
+                messages=[attribute_response],
                 tools=[],
                 system_message=AgentMessage(
                     role="system",
@@ -268,7 +275,7 @@ class PlannerAgent(LLMAgent):
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
-            print(self.system_message)
+            # print(self.system_message)
             print(messages[-1].content)
             print("CONTENT PLANNER", content)
             print("*****")
@@ -291,13 +298,18 @@ class PlannerAgent(LLMAgent):
                         SubTaskForParse(**m)
                         for m in json.loads(parsed_plan_message.content)
                     ]
-                    # If the plan is just a single step, replace with the direct question from the user
+                    # If the plan is just a single step, replace with the direct question from the user with the attributes
                     if len(parsed_plan) == 1:
                         parsed_plan[0].prompt = (
                             messages[-1]
                             .content.replace("<objective>", "")
                             .replace("</objective>", "")
                         )
+                    # Else, add the attributes to the final step
+                    else:
+                        parsed_plan[
+                            -1
+                        ].prompt += f" The final attributes should be {attributes}."
                     for sub_task in parsed_plan:
                         self._plan.put(
                             SubTask(
