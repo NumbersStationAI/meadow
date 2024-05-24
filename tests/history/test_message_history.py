@@ -21,20 +21,18 @@ def test_add_message(mock_agent: Mock) -> None:
         mock_agent not in message_history.get_all_messages()
     )  # Ensure history is initially empty for the agent
 
-    message = AgentMessage(
-        content="Hello, world!", generating_agent="test", role="user"
-    )
+    message = AgentMessage(content="Hello, world!", sending_agent="test", role="user")
     message_history.add_message(mock_agent, "user", message)
     assert message_history.get_messages(mock_agent) == [message]
     # Adding another message
     another_message = AgentMessage(
-        content="Bye, world!", generating_agent="test", role="assistant"
+        content="Bye, world!", sending_agent="test", role="assistant"
     )
     message_history.add_message(mock_agent, "assistant", another_message)
     assert message_history.get_messages(mock_agent) == [message, another_message]
     # Add third message and switch roles
     third_message = AgentMessage(
-        content="Hello again!", generating_agent="test", role="user"
+        content="Hello again!", sending_agent="test", role="user"
     )
     message_history.add_message(mock_agent, "assistant", third_message)
     assert message_history.get_messages(mock_agent)[-1].role == "assistant"
@@ -53,13 +51,13 @@ def test_get_all_messages_multiple_agents() -> None:
     agent_one = Mock(spec=Agent)
     agent_two = Mock(spec=Agent)
     message_one = AgentMessage(
-        content="Hello, world!", role="assistant", generating_agent="agent_one"
+        content="Hello, world!", role="assistant", sending_agent="agent_one"
     )
     message_two = AgentMessage(
-        content="Hello, world 2!", role="assistant", generating_agent="agent_two"
+        content="Hello, world 2!", role="assistant", sending_agent="agent_two"
     )
     message_three = AgentMessage(
-        content="Hello, world 3!", role="assistant", generating_agent="agent_one"
+        content="Hello, world 3!", role="assistant", sending_agent="agent_one"
     )
 
     message_history.add_message(agent_one, "assistant", message_one)
@@ -78,17 +76,17 @@ def test_get_messages_skip_exit() -> None:
     message_history = MessageHistory()
     agent_one = Mock(spec=Agent)
     message_one = AgentMessage(
-        content="Hello, world!", role="assistant", generating_agent="agent_one"
+        content="Hello, world!", role="assistant", sending_agent="agent_one"
     )
-    message_two = AgentMessage(content="I'm done", role="user", generating_agent="user")
+    message_two = AgentMessage(content="I'm done", role="user", sending_agent="user")
     message_three = AgentMessage(
         content="See ya <exit>",
         role="assistant",
-        generating_agent="agent_one",
+        sending_agent="agent_one",
         is_termination_message=True,
     )
     message_four = AgentMessage(
-        content="Show me cats", role="user", generating_agent="user"
+        content="Show me cats", role="user", sending_agent="user"
     )
 
     message_history.add_message(agent_one, "assistant", message_one)

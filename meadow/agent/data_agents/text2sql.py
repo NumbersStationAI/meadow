@@ -3,13 +3,11 @@
 import logging
 from typing import Callable
 
-from meadow.agent.agent import Agent, AgentRole, LLMAgentWithExecutors
-from meadow.agent.data_agents.text2sql_utils import (
-    check_empty_table,
-    parse_sql_response,
+from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
+from meadow.agent.executor.contrib.empty_result_debugger import EmptyResultExecutor
+from meadow.agent.executor.contrib.sql_validate_reask import (
+    SQLValidateExecutor,
 )
-from meadow.agent.exectors.empty_result import EmptyResultExecutor
-from meadow.agent.exectors.reask import ExecutorAgent, ReaskExecutorAgent
 from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.utils import (
     generate_llm_reply,
@@ -18,7 +16,7 @@ from meadow.agent.utils import (
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.database import Database
-from meadow.database.serializer import serialize_as_xml
+from meadow.database.serializer import serialize_as_list, serialize_as_xml
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -27,14 +25,12 @@ DEFAULT_SQL_PROMPT = """You generate {dialect} SQL queries and are a {dialect} e
 
 1. Feel free to think through what you need to do first.
 2. Use <description></description> tags for a one sentence description of what the table captures. Be concise.
-3. Use <sql></sql> tags for the SQL. Please refer to views and base tables in the SQL if necessary.
+3. Use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
 4. If the user responds back at some point with a message that indicates the user is satisfied with the SQL (e.g. "looks good" or "continue to next step"), response ONLY with {termination_message} tags. They should NEVER be used in conjunction with <sql> or other tags.
 
 The user's schema is:
 {schema}
 """
-
-DEFAULT_REASK_SUFFIX = "\n\nPlease output a single SQL query in <sql></sql> that will resolve the issue. Take your best guess as to the correct SQL."
 
 
 class SQLGeneratorAgent(LLMAgentWithExecutors):
@@ -66,20 +62,16 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         # Override with defaults
         if self._executors is None:
             self._executors = [
-                ReaskExecutorAgent(
+                SQLValidateExecutor(
                     client=self._client,
                     llm_config=self._llm_config,
                     database=self._database,
-                    execution_func=parse_sql_response,
-                    reask_suffix=DEFAULT_REASK_SUFFIX,
                     llm_callback=self._llm_callback,
                 ),
                 EmptyResultExecutor(
                     client=self._client,
                     llm_config=self._llm_config,
                     database=self._database,
-                    execution_func=check_empty_table,
-                    reask_suffix=DEFAULT_REASK_SUFFIX,
                     llm_callback=self._llm_callback,
                 ),
             ]
@@ -92,7 +84,8 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "Generates a single SQL query based on the given user instruction. Each instruction should be a detailed description of what attributes, aggregates, filter conditions, tables, and joins are needed in the SQL query along with any custom functions that are needed (e.g. ROW_NUMBER, RANK, LAG, ...)."
+        # return "Generates a single SQL query based on the given user instruction. Each instruction should be a detailed description of what attributes, aggregates, filter conditions, tables, and joins are needed in the SQL query along with any custom functions that are needed (e.g. ROW_NUMBER, RANK, LAG, ...)."
+        return "Generates a single SQL query based on the given user instruction."
 
     @property
     def llm_client(self) -> Client:
@@ -107,7 +100,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
     @property
     def system_message(self) -> str:
         """Get the system message."""
-        serialized_schema = serialize_as_xml(self.database.tables)
+        serialized_schema = serialize_as_list(self.database.tables)
         return self._system_prompt.format(
             schema=serialized_schema,
             termination_message=Commands.END,
@@ -134,6 +127,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         if not message:
             logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
+        message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)
         await recipient.receive(message, self)
 
@@ -162,21 +156,22 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply when Executor agent."""
-        # print(colored("SQL AGENT", "red"))
-        # print(self.system_message)
         messages_start_idx = -1
         while (
             abs(messages_start_idx) <= len(messages)
             and messages[messages_start_idx].requires_response
         ):
             messages_start_idx -= 2
-        print(messages_start_idx, "STARTING")
         messages = messages[messages_start_idx:]
-        for msg in messages:
-            print(msg.role)
-            print(msg.content)
-        print("-------")
-        print("-------")
+        # print(messages_start_idx, "STARTING")
+        messages[0].content = messages[0].content
+        if messages_start_idx < 1:
+            print(self.system_message)
+            for msg in messages:
+                print(msg.role)
+                print(msg.content)
+            print("-------")
+            print("-------")
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -184,21 +179,27 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
             system_message=AgentMessage(
                 role="system",
                 content=self.system_message,
-                generating_agent=self.name,
+                sending_agent=self.name,
             ),
             llm_config=self._llm_config,
             llm_callback=self._llm_callback,
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
+        if "```sql" in content:
+            if "<sql>" in content:
+                content = content.replace("```sql", "").replace("```", "")
+            else:
+                content = content.replace("```sql", "<sql>").replace("```", "</sql>")
         if content.endswith("<end>") and "<sql" in content:
             content = content.replace("<end>", "")
-        print("SQL AGENT CONTENT", content)
-        print("*****")
+        if messages_start_idx < 1:
+            print("SQL AGENT CONTENT", content)
+            print("*****")
         return AgentMessage(
             role="assistant",
             content=content,
             tool_calls=None,
-            generating_agent=self.name,
+            sending_agent=self.name,
             requires_execution=True,
         )

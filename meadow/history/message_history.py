@@ -1,8 +1,21 @@
 """Class for managing message history between different agents."""
 
+import time
+
 from meadow.agent.agent import Agent
 from meadow.agent.schema import AgentMessage
 from meadow.client.schema import Role
+
+
+def is_time_unique(
+    history: dict[Agent, list[AgentMessage]], time_to_check: float
+) -> bool:
+    """Check if the time is unique in the history."""
+    for messages in history.values():
+        for message in messages:
+            if message.creation_time == time_to_check:
+                return False
+    return True
 
 
 class MessageHistory:
@@ -23,7 +36,8 @@ class MessageHistory:
         # make a copy of the message to avoid modifying the original
         message = message.model_copy()
         message.role = role
-        # message.creation_time = datetime.now()
+        message.creation_time = time.time()
+        assert is_time_unique(self._history, message.creation_time)
         self._history[agent].append(message)
 
     def get_messages(
@@ -59,7 +73,10 @@ class MessageHistory:
 
     def get_all_messages(self) -> dict[Agent, list[AgentMessage]]:
         """Get all messages in the history."""
-        return self._history
+        to_return = {}
+        for agent, history in self._history.items():
+            to_return[agent] = history
+        return to_return
 
     def get_messages_linearly_by_time(self) -> list[AgentMessage]:
         """Get all messages in the history linearly by time."""

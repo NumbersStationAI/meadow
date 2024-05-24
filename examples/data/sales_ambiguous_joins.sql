@@ -1,3 +1,9 @@
+-- customers JOIN demographics ON customers.cust_num = demographics.cid
+-- suppliers JOIN products ON suppliers.supp_id = products.supplier_alt_id
+-- orders JOIN order_items ON orders.order_num = order_items.ord_ref
+-- orders JOIN products ON CAST(products.prod_id AS text) = order_items.prod_num
+-- orders JOIN customers ON orders.cust_ref = customers.cust_num
+
 -- Creating the 'customers' table
 CREATE TABLE customers (
     alt_id VARCHAR,
@@ -188,7 +194,7 @@ CREATE TABLE order_items (
     unit_price DECIMAL(10, 2)
 );
 
--- Inserting sample data into 'order_items'-- Inserting sample data into 'order_items'
+-- Inserting sample data into 'order_items'
 INSERT INTO order_items (item_id, ord_ref, prod_num, quantity, unit_price) VALUES
 (1, 'ORD1001', '1001', 1, 1200.00),
 (2, 'ORD1001', '1003', 2, 140.00),
@@ -249,5 +255,5 @@ INSERT INTO order_items (item_id, ord_ref, prod_num, quantity, unit_price) VALUE
 (57, 'ORD1028', '1017', 1, 30.00),
 (58, 'ORD1029', '1018', 2, 10.00),
 (59, 'ORD1029', '1019', 3, 12.00),
-(60, 'ORD1030', '1020', 5, 8.00)
+(60, 'ORD1030', '1020', 5, 8.00),
 (61, 'ORD1030', '1006', 15, 3.00);

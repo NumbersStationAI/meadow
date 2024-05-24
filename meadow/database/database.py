@@ -71,7 +71,22 @@ def extract_columns_from_df(df: pd.DataFrame) -> list[Column]:
     return columns
 
 
-# TODO: does this need to be a class or can it just be a pydantic thing
+def check_if_non_select_query(sql: str) -> bool:
+    """Check if the SQL is a non-select query."""
+    parsed = sqlglot.parse_one(sql, dialect="sqlite")
+    if (
+        parsed.find(sqlglot.exp.Create)
+        or parsed.find(sqlglot.exp.Drop)
+        or parsed.find(sqlglot.exp.Update)
+        or parsed.find(sqlglot.exp.Insert)
+        or parsed.find(sqlglot.exp.Delete)
+        or parsed.find(sqlglot.exp.AlterTable)
+        or parsed.find(sqlglot.exp.AlterColumn)
+    ):
+        return True
+    return False
+
+
 class Database:
     """Representation of database."""
 
@@ -98,9 +113,17 @@ class Database:
             return self._view_tables[name]
         return None
 
+    def finalize_draft_views(self) -> None:
+        """Finalize all draft views."""
+        for _, table in self._view_tables.items():
+            if table.is_draft:
+                table.is_draft = False
+
     def run_sql_to_df(self, sql: str) -> pd.DataFrame:
         """Run an SQL query."""
         sql = self.normalize_query(sql)
+        if check_if_non_select_query(sql):
+            raise ValueError("Only SELECT queries are allowed.")
         self._connector.connect()
         result = self._connector.run_sql_to_df(sql)
         self._connector.close()
@@ -128,6 +151,7 @@ class Database:
             name=name,
             description=description,
             is_view=True,
+            is_draft=True,
             columns=estimated_columns,
             view_sql=sql,
         )

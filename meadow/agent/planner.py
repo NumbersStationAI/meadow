@@ -21,7 +21,7 @@ from meadow.agent.utils import (
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.database import Database
-from meadow.database.serializer import serialize_as_xml
+from meadow.database.serializer import serialize_as_list, serialize_as_xml
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -71,8 +71,9 @@ def parse_steps(input_str: str) -> list[tuple[str, str]]:
     """
     Parse the given XML-like string and extract agent, instruction pairs using regular expressions.
     """
+    # Use '.*' after last instruction because sometimes it'll add extra pieces we don't care about
     pattern = re.compile(
-        r"<step\d*>\s*<agent>(.*?)</agent>\s*<instruction>(.*?)</instruction>\s*</step\d*>",
+        r"<step\d*>\s*<agent>(.*?)</agent>\s*<instruction>(.*?)</instruction>.*?</step\d*>",
         re.DOTALL,
     )
     matches = pattern.findall(input_str)
@@ -82,7 +83,6 @@ def parse_steps(input_str: str) -> list[tuple[str, str]]:
 def parse_plan(
     message: str,
     agent_name: str,
-    database: Database,  # required for use in an executor
     available_agents: dict[str, Agent],
 ) -> AgentMessage:
     """Extract the plan from the response.
@@ -96,6 +96,8 @@ def parse_plan(
     ...
     </steps>.
     """
+    if message.endswith("</steps"):
+        message += ">"
     if "<steps>" not in message:
         raise ValueError(f"Plan not found in the response. message={message}")
     inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
@@ -112,7 +114,7 @@ def parse_plan(
         content=json.dumps([m.model_dump() for m in plan]),
         display_content=inner_steps,
         tool_calls=None,
-        generating_agent=agent_name,
+        sending_agent=agent_name,
         requires_response=False,
     )
 
@@ -175,7 +177,7 @@ class PlannerAgent(LLMAgent):
     def system_message(self) -> str:
         """Get the system message."""
         if self._database is not None:
-            serialized_schema = serialize_as_xml(self._database.tables)
+            serialized_schema = serialize_as_list(self._database.tables)
             serialized_schema = f"\nBelow is the data schema the user is working with.\n{serialized_schema}\n"
         else:
             serialized_schema = ""
@@ -216,6 +218,7 @@ class PlannerAgent(LLMAgent):
         if not message:
             logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
+        message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)
         await recipient.receive(message, self)
 
@@ -251,7 +254,6 @@ class PlannerAgent(LLMAgent):
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
         if self.llm_client is not None:
-            print(self.system_message)
             chat_response = await generate_llm_reply(
                 client=self.llm_client,
                 messages=messages,
@@ -259,13 +261,15 @@ class PlannerAgent(LLMAgent):
                 system_message=AgentMessage(
                     role="system",
                     content=self.system_message,
-                    generating_agent=self.name,
+                    sending_agent=self.name,
                 ),
                 llm_config=self._llm_config,
                 llm_callback=self._llm_callback,
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
+            print(self.system_message)
+            print(messages[-1].content)
             print("CONTENT PLANNER", content)
             print("*****")
             if Commands.has_end(content):
@@ -273,20 +277,27 @@ class PlannerAgent(LLMAgent):
                     role="assistant",
                     content=content,
                     tool_calls=None,
-                    generating_agent=self.name,
+                    sending_agent=self.name,
                     is_termination_message=True,
                 )
             else:
                 display_content = None
                 try:
                     parsed_plan_message = parse_plan(
-                        content, self.name, self._database, self._available_agents
+                        content, self.name, self._available_agents
                     )
                     display_content = parsed_plan_message.display_content
                     parsed_plan = [
                         SubTaskForParse(**m)
                         for m in json.loads(parsed_plan_message.content)
                     ]
+                    # If the plan is just a single step, replace with the direct question from the user
+                    if len(parsed_plan) == 1:
+                        parsed_plan[0].prompt = (
+                            messages[-1]
+                            .content.replace("<objective>", "")
+                            .replace("</objective>", "")
+                        )
                     for sub_task in parsed_plan:
                         self._plan.put(
                             SubTask(
@@ -303,7 +314,7 @@ class PlannerAgent(LLMAgent):
                     role="assistant",
                     content=content,
                     display_content=display_content,
-                    generating_agent=self.name,
+                    sending_agent=self.name,
                 )
         else:
             if len(self._available_agents) > 1:
@@ -319,5 +330,5 @@ class PlannerAgent(LLMAgent):
             return AgentMessage(
                 role="assistant",
                 content=serialized_plan,
-                generating_agent=self.name,
+                sending_agent=self.name,
             )

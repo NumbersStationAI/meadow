@@ -33,5 +33,5 @@ class EvalUserAgent(UserAgent):
         return AgentMessage(
             role="assistant",
             content=Commands.NEXT,
-            generating_agent=self.name,
+            sending_agent=self.name,
         )

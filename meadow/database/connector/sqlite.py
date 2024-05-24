@@ -26,6 +26,7 @@ class SQLiteConnector(Connector):
     def connect(self) -> None:
         """Connect to the database."""
         self.conn = sqlite3.connect(self.db_path)
+        self.conn.text_factory = lambda b: b.decode(errors="ignore")
         self.conn.row_factory = sqlite3.Row  # Enables column access by name
 
     def close(self) -> None:

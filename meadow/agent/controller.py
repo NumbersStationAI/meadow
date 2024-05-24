@@ -4,11 +4,11 @@ import logging
 
 from termcolor import colored
 
-from meadow.agent.agent import Agent, AgentRole
-from meadow.agent.exectors.reask import ExecutorAgent
+from meadow.agent.agent import Agent, AgentRole, ExecutorAgent
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.utils import print_message
+from meadow.database.database import Database
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -21,11 +21,14 @@ class ControllerAgent(Agent):
         self,
         supervisor: Agent,
         planner: PlannerAgent,
+        database: Database,
         supervisor_auto_respond: bool = False,
         silent: bool = True,
+        name: str = "Controller",
     ):
         self._supervisor = supervisor
         self._planner = planner
+        self._database = database
         self._messages = MessageHistory()
         self._agent_executors: dict[Agent, list[ExecutorAgent]] = {
             agent: agent.executors
@@ -40,20 +43,25 @@ class ControllerAgent(Agent):
         self._current_task_agent: Agent = self._planner
         self._supervisor_auto_respond = supervisor_auto_respond
         self._silent = silent
+        self._name = name
 
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "Controller"
+        return self._name
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
         return "Overlord"
 
+    @property
+    def database(self) -> Database:
+        """The database used by the agent."""
+        return self._database
+
     def set_current_agent(self, agent: Agent) -> None:
         """Set the current task agent."""
-        print("SWAPPING", agent)
         self._current_agent = agent
 
     def set_current_task_agent(self, agent: Agent) -> None:
@@ -69,8 +77,15 @@ class ControllerAgent(Agent):
         if not message:
             logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
-        print(colored(f"IN SEND ADDING ASSISTANT {recipient.name}", "red"))
-        print("MESSAGE", message.content)
+        # print(
+        #     colored(
+        #         f"IN SEND {self.name} (assistant role) WITH RECIPIENT {recipient.name}",
+        #         "red",
+        #     )
+        # )
+        # print("MESSAGE", message.content, "\n\nDISPLAY", message.display_content)
+        # print("-----")
+        message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)
         await recipient.receive(message, self)
 
@@ -87,8 +102,13 @@ class ControllerAgent(Agent):
                 to_agent=self.name,
             )
         # update the message history
-        print(colored(f"IN RECIEVE ADDING USER {sender.name}", "blue"))
-        print("MESSAGE", message.content)
+        print(
+            colored(
+                f"IN RECIEVE {self.name} (user role) WITH SENDER {sender.name}", "blue"
+            )
+        )
+        print("MESSAGE", message.content, "\n\nDISPLAY", message.display_content)
+        print("-----")
         self._messages.add_message(agent=sender, role="user", message=message)
 
         reply = await self.generate_reply(
@@ -104,11 +124,11 @@ class ControllerAgent(Agent):
             auto_response = AgentMessage(
                 role="assistant",
                 content=Commands.NEXT,
-                generating_agent=self.name,
+                sending_agent=self.name,
             )
-            # self._messages.add_message(
-            #     agent=self._supervisor, role="assistant", message=reply
-            # )
+            self._messages.add_message(
+                agent=self._supervisor, role="assistant", message=reply
+            )
             # self._supervisor._messages.add_message(
             #     agent=self, role="user", message=reply
             # )
@@ -124,7 +144,6 @@ class ControllerAgent(Agent):
     ) -> AgentMessage:
         """Generate a reply to move to the next step in the task plan."""
         next_task = self._planner.move_to_next_agent()
-        print("IN NEXT STEP", next_task)
         if next_task:
             self.set_current_task_agent(next_task.agent)
             self.set_current_agent(next_task.agent)
@@ -141,7 +160,7 @@ class ControllerAgent(Agent):
             role="assistant",
             content=next_message,
             display_content=next_display,
-            generating_agent=self.name,
+            sending_agent=self.name,
             is_termination_message=is_termination_message,
         )
 
@@ -150,24 +169,22 @@ class ControllerAgent(Agent):
     ) -> AgentMessage:
         """Generate a reply after execution.
 
-        If the execution does not error, return the last executor response which could do some
-        parsing of the output.
-
-        Otherwise, return the first error message.
+        FOX ME
         """
         executor_response = None
         default_response = AgentMessage(
             role="assistant",
             content=messages[-1].content,
             display_content=messages[-1].display_content,
-            generating_agent=self.name,
+            sending_agent=self.name,
         )
         last_message = messages[-1]
-        print("IN EXECUTOR REPLY", self._agent_executors.get(sender, []))
         if messages[-1].requires_execution and self._agent_executors.get(sender, []):
             for executor in self._agent_executors.get(sender, []):
+                print("USING EXECUTOR", executor)
                 # Generate a new chat between sender and executor
                 sub_controller = ControllerAgent(
+                    name=f"{sender.name}_{executor.name}_Controller",
                     supervisor=sender,
                     # Very simply planner that always sends instruction to executor
                     # in a single step.
@@ -177,11 +194,12 @@ class ControllerAgent(Agent):
                         llm_config=None,
                         database=None,
                     ),
+                    database=self.database,
                     supervisor_auto_respond=True,
                     silent=self._silent,
                 )
-                print("SENDER TO CHANGE TO SUPERVISOR", sender)
                 sender.set_chat_role(AgentRole.SUPERVISOR)
+                # TODO: clean up
                 sender._messages._history[sub_controller] = [
                     msg.model_copy() for msg in sender._messages._history[self]
                 ]
@@ -192,8 +210,12 @@ class ControllerAgent(Agent):
                     last_message.content
                 )
                 last_message = executor_response.model_copy()
-                print("SENDER TO CHANGE TO EXEC", sender)
                 sender.set_chat_role(AgentRole.EXECUTOR)
+            # Finalize any temporary draft data views made and edited by the executors into final
+            # views for the next step
+            # TODO: MAKE LESS JANKY
+            if self.name == "Controller":
+                self.database.finalize_draft_views()
         final_response = last_message or default_response
         # The current_task_agent is the agent of the task that is currently answering the user's
         # question. current_agent is whoever we last chatted with. When a user responds, current_agent
@@ -210,11 +232,6 @@ class ControllerAgent(Agent):
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
         # TODO: add comments once finalized
-        print("^^^^^^^^^^^^^^^^^^^^^")
-        print("^^^^^^^^^^^^^^^^^^^^^")
-        print("SUPER", self._supervisor, "AGENT", self._current_agent)
-        print("^^^^^^^^^^^^^^^^^^^^^")
-        print("^^^^^^^^^^^^^^^^^^^^^")
         if Commands.has_next(messages[-1].content):
             assert sender == self._supervisor, "Only user can send move on message."
             return await self._generate_next_step_reply(messages, sender)
@@ -232,7 +249,7 @@ class ControllerAgent(Agent):
                     role="assistant",
                     content=messages[-1].content,
                     display_content=messages[-1].display_content,
-                    generating_agent=self.name,
+                    sending_agent=self.name,
                     is_termination_message=True,
                 )
             else:
@@ -249,19 +266,24 @@ class ControllerAgent(Agent):
         Will return the last non termination message sent to the supervisor.
         """
         message = AgentMessage(
-            role="user", content=input, generating_agent=self._supervisor.name
+            role="user", content=input, sending_agent=self._supervisor.name
         )
+        # print("STARTING CHAT WITH ", message, "TO", self._supervisor)
         await self.receive(message, self._supervisor)
         all_messages = self._messages.get_messages_linearly_by_time()
         # Find last message that isn't with end tags
         # It's okay if the last message is a termination message, it can still have
         # content. We want to avoid the end tags.
-        for msg in all_messages:
-            print("MSG SUP", msg.content, "\n\n----\n\n", msg.display_content)
-            print()
+        # for msg in all_messages:
+        #     print("MSG SUP", msg.content, "\n\n----\n\n", msg.display_content)
+        #     print()
+        print("CHAT RESPONSE", self.name, "SUP", self._supervisor.name)
         for message in reversed(all_messages):
             if not Commands.has_end(message.content) and not Commands.has_next(
                 message.content
             ):
+                print(
+                    "RETURNING", message.content, "-----\n\n", message.display_content
+                )
                 return message
         return None

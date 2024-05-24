@@ -42,6 +42,7 @@ class UserAgent(Agent):
         recipient: Agent,
     ) -> None:
         """Send a message to another agent."""
+        message.receiving_agent = recipient.name
         await recipient.receive(message, self)
 
     async def receive(
@@ -67,4 +68,4 @@ class UserAgent(Agent):
         """Generate a reply based on the received messages."""
         # Get the input from a user
         reply = input(">>> ")
-        return AgentMessage(role="assistant", content=reply, generating_agent=self.name)
+        return AgentMessage(role="assistant", content=reply, sending_agent=self.name)

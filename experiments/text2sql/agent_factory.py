@@ -4,10 +4,9 @@ from pydantic import BaseModel
 
 from meadow.agent.agent import Agent
 from meadow.agent.controller import ControllerAgent
-from meadow.agent.data_agents.text2sql import DEFAULT_REASK_SUFFIX, SQLGeneratorAgent, parse_sql_response
-from meadow.agent.data_agents.text2sql_utils import check_empty_table
-from meadow.agent.exectors.empty_result import EmptyResultExecutor
-from meadow.agent.exectors.reask import ReaskExecutorAgent, ExecutorAgent
+from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
+from meadow.agent.executor.contrib.empty_result_debugger import EmptyResultExecutor
+from meadow.agent.executor.contrib.sql_validate_reask import SQLValidateExecutor
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
 from meadow.client.client import Client
@@ -16,21 +15,50 @@ from meadow.database.database import Database
 
 logger = logging.getLogger(__name__)
 
-SIMPLE_SQL_PROMPT = """Given the table schema and user's question, generate a SQLite SQL query that answers it. Use <sql></sql> tags for the SQL. Feel free to think through what you need to do first. If the user responds back at some point with a message that indicates the user is satisfied with the SQL, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
+SQL_PROMPT_WITH_PLANNER = """You generate SQLite SQL queries and are a SQLite expert. Given the table schema and user's question, generate a SQLite SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
 
-{schema}
-"""
+1. Feel free to think through what you need to do first.
+2. First use <description></description> tags for a one sentence description of what the table captures. Be concise.
+3. Then <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
+4. Please use `FROM sqlXXX` to refer to the SQL query number XXX in the prompt. For example, if sql2 is in the schema from a prior step, please use `FROM sql2` to refer to that query.
 
-SQL_PLANNER_PROMPT = """The user wants to answer an analytics question in SQL based on the following schema.
+The user's schema is:
+{schema}"""
 
-{serialized_schema}
-The user's question may be complex or vague. Based on the following question provided by the user, please make a plan consisting of a sequence of sub-SQL-queries for how to answer this question using the following agents:
+# SQL_PLANNER_PROMPT = """The user wants to answer an analytics question in SQL based on the following schema.
 
-<agents>
+# {serialized_schema}
+# The user's question may be complex or vague. Based on the following question provided by the user, please make a plan consisting of a sequence of sub-SQL-queries for how to answer this question using the following agents:
+
+# <agents>
+# {agents}
+# </agents>
+
+# For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. To reference a past step (e.g. step 2), please use the phrase `sql 2` to reference the second sql generated. You can use the same agent multiple times. If you are confused by the task or need more details, please ask for feedback. The user may also provide suggestions to the plan that you should take into account when generating the plan. When generating a plan, please use the following tag format to specify the plan.
+
+# <steps>
+# <step1>
+# <agent>...</agent>
+# <instruction>...</instruction>
+# </step1>
+# <step2>
+# ...
+# </step2>
+# ...
+# </steps>
+
+# If the user responds back at some point with a message that indicates the user is satisfied with the plan, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
+
+# Lastly, use as few steps as possible."""
+
+
+SQL_PLANNER_PROMPT_SPIDER = """The user wants to answer an analytics question in SQL.
+
+Based on the following question provided by the user, please make a plan consisting of a minimal sequence of SQL-queries using the following agent:
+
 {agents}
-</agents>
 
-For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. To reference a past step (e.g. step 2), please use the phrase `sql 2` to reference the second sql generated. You can use the same agent multiple times. If you are confused by the task or need more details, please ask for feedback. The user may also provide suggestions to the plan that you should take into account when generating the plan. When generating a plan, please use the following tag format to specify the plan.
+For each SQL in the sequence, indicate which agents should perform the task and generate an instruction for the agent to follow using prior steps. To reference a past step (e.g. to reference step 2, please use the phrase `sql2` in the instruction). You can use the same agent multiple times. When generating a plan, please use the following tag format to specify the plan.
 
 <steps>
 <step1>
@@ -43,16 +71,12 @@ For each sub-step in the sequence, indicate which agents should perform the task
 ...
 </steps>
 
-If the user responds back at some point with a message that indicates the user is satisfied with the plan, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
+The user's schema is below.
 
-Lastly, use as few steps as possible."""
-
-SQL_EXECUTOR_PROMPT = """You are a error debugging SQL assistant who needs to help a user understand their SQL error message and suggest how to fix it.
-
-Below is the data schema the user is working with.
 {serialized_schema}
 
-Given the user's message below, please explain the error and suggset in freeform text how to fix the query. The query may need additional tables, fixes in function use, or other modifications. Please provide a detailed explanation of the error and how to fix it."""
+Please keep the plan simple and use as few steps as possible. Be very explicit about which columns should be selected at the end. Only select exactly what the user asks and nothing more."""
+
 
 class PromptLog(BaseModel):
     """Prompt log."""
@@ -121,24 +145,14 @@ def get_simple_text2sql_agent(
         llm_config=llm_config,
         database=database,
         executors=[
-            ReaskExecutorAgent(
+            SQLValidateExecutor(
                 client=None,
                 llm_config=llm_config,
                 database=database,
-                execution_func=parse_sql_response,
-                reask_suffix=DEFAULT_REASK_SUFFIX,
                 max_execution_attempts=0,
             ),
-            ReaskExecutorAgent(
-                client=None,
-                llm_config=None,
-                database=database,
-                execution_func=check_empty_table,
-                reask_suffix=DEFAULT_REASK_SUFFIX,
-                max_execution_attempts=0,
-            )
         ],
-        system_prompt=SIMPLE_SQL_PROMPT,
+        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback,
     )
@@ -147,10 +161,10 @@ def get_simple_text2sql_agent(
         client=None,
         llm_config=llm_config,
         database=database,
-        system_prompt=SQL_PLANNER_PROMPT,
+        system_prompt=SQL_PLANNER_PROMPT_SPIDER,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, database=database, silent=True)
     return controller
 
 
@@ -180,23 +194,14 @@ def get_text2sql_planner_agent(
         llm_config=llm_config,
         database=database,
         executors=[
-            ReaskExecutorAgent(
+            SQLValidateExecutor(
                 client=None,
                 llm_config=llm_config,
                 database=database,
-                execution_func=parse_sql_response,
-                reask_suffix=DEFAULT_REASK_SUFFIX,
                 max_execution_attempts=0,
             ),
-            ReaskExecutorAgent(
-                client=None,
-                llm_config=None,
-                database=database,
-                execution_func=check_empty_table,
-                reask_suffix=DEFAULT_REASK_SUFFIX,
-                max_execution_attempts=0,
-            )
         ],
+        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -205,11 +210,11 @@ def get_text2sql_planner_agent(
         client=planner_client,
         llm_config=llm_config,
         database=database,
-        system_prompt=SQL_PLANNER_PROMPT,
+        system_prompt=SQL_PLANNER_PROMPT_SPIDER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )
-    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, database=database, silent=True)
     return controller
 
 
@@ -233,27 +238,18 @@ def get_text2sql_simple_reask_agent(
     )
     # Have to build custom executor that doesn't use LLM
     no_llm_executor = [
-        ReaskExecutorAgent(
+        SQLValidateExecutor(
             client=None,
             llm_config=None,
             database=database,
-            execution_func=parse_sql_response,
-            reask_suffix=DEFAULT_REASK_SUFFIX,
         ),
-        ReaskExecutorAgent(
-            client=None,
-            llm_config=None,
-            database=database,
-            execution_func=check_empty_table,
-            reask_suffix=DEFAULT_REASK_SUFFIX,
-        )
     ]
     text2sql = SQLGeneratorAgent(
         client=client,
         llm_config=llm_config,
         database=database,
         executors=no_llm_executor,
-        system_prompt=SIMPLE_SQL_PROMPT,
+        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -262,10 +258,10 @@ def get_text2sql_simple_reask_agent(
         client=None,
         llm_config=llm_config,
         database=database,
-        system_prompt=SQL_PLANNER_PROMPT,
+        system_prompt=SQL_PLANNER_PROMPT_SPIDER,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, database=database, silent=True)
     return controller
 
 
@@ -292,26 +288,18 @@ def get_text2sql_simple_reask_planner_agent(
     )
     # Have to build custom executor that doesn't use LLM
     no_llm_executor = [
-        ReaskExecutorAgent(
+        SQLValidateExecutor(
             client=None,
             llm_config=None,
             database=database,
-            execution_func=parse_sql_response,
-            reask_suffix=DEFAULT_REASK_SUFFIX,
         ),
-        ReaskExecutorAgent(
-            client=None,
-            llm_config=None,
-            database=database,
-            execution_func=check_empty_table,
-            reask_suffix=DEFAULT_REASK_SUFFIX,
-        )
     ]
     text2sql = SQLGeneratorAgent(
         client=client,
         llm_config=llm_config,
         database=database,
         executors=no_llm_executor,
+        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -320,11 +308,11 @@ def get_text2sql_simple_reask_planner_agent(
         client=planner_client,
         llm_config=llm_config,
         database=database,
-        system_prompt=SQL_PLANNER_PROMPT,
+        system_prompt=SQL_PLANNER_PROMPT_SPIDER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )
-    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, database=database, silent=True)
     return controller
 
 
@@ -354,19 +342,15 @@ def get_text2sql_llm_reask_agent(
         all_prompts_to_save,
     )
     llm_executor = [
-        ReaskExecutorAgent(
+        SQLValidateExecutor(
             client=None,
             llm_config=None,
             database=database,
-            system_prompt=SQL_EXECUTOR_PROMPT,
-            execution_func=parse_sql_response,
-            reask_suffix=DEFAULT_REASK_SUFFIX,
         ),
         EmptyResultExecutor(
             client=client,
             llm_config=llm_config,
             database=database,
-            execution_func=check_empty_table,
             llm_callback=callback_empty,
         )
     ]
@@ -375,7 +359,7 @@ def get_text2sql_llm_reask_agent(
         llm_config=llm_config,
         database=database,
         executors=llm_executor,
-        system_prompt=SIMPLE_SQL_PROMPT,
+        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -384,10 +368,10 @@ def get_text2sql_llm_reask_agent(
         client=None,
         llm_config=llm_config,
         database=database,
-        system_prompt=SQL_PLANNER_PROMPT,
+        system_prompt=SQL_PLANNER_PROMPT_SPIDER,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, database=database, silent=True)
     return controller
 
 
@@ -420,19 +404,15 @@ def get_text2sql_llm_reask_planner_agent(
         model_messages, chat_response, example_idx, "PlannerAgent", all_prompts_to_save
     )
     llm_executor = [
-        ReaskExecutorAgent(
+        SQLValidateExecutor(
             client=None,
             llm_config=None,
             database=database,
-            system_prompt=SQL_EXECUTOR_PROMPT,
-            execution_func=parse_sql_response,
-            reask_suffix=DEFAULT_REASK_SUFFIX,
         ),
         EmptyResultExecutor(
             client=client,
             llm_config=llm_config,
             database=database,
-            execution_func=check_empty_table,
             llm_callback=callback_empty,
         )
     ]
@@ -441,6 +421,7 @@ def get_text2sql_llm_reask_planner_agent(
         llm_config=llm_config,
         database=database,
         executors=llm_executor,
+        system_prompt=SQL_PROMPT_WITH_PLANNER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_sql,
     )
@@ -449,9 +430,9 @@ def get_text2sql_llm_reask_planner_agent(
         client=planner_client,
         llm_config=llm_config,
         database=database,
-        system_prompt=SQL_PLANNER_PROMPT,
+        system_prompt=SQL_PLANNER_PROMPT_SPIDER,
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )
-    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(supervisor=user_agent, planner=planner, database=database, silent=True)
     return controller

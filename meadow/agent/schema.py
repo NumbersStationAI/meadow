@@ -1,7 +1,7 @@
 """Agent schema classes."""
 
-from datetime import datetime
 import logging
+import time
 from typing import Any, Callable
 
 from pydantic import BaseModel, model_validator
@@ -40,7 +40,9 @@ class AgentMessage(ChatMessage):
     """
     display_content: str | None = None
 
-    generating_agent: str
+    sending_agent: str
+
+    receiving_agent: str | None = None
 
     is_termination_message: bool = False
 
@@ -51,7 +53,7 @@ class AgentMessage(ChatMessage):
     """If message requires being sent to the agent's executors."""
     requires_execution: bool = False
 
-    creation_time: datetime = datetime.now()
+    creation_time: float = time.time()
 
     @model_validator(mode="after")
     def set_default_second_attr(self) -> "AgentMessage":

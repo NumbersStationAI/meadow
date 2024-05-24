@@ -7,7 +7,7 @@ from meadow.agent.agent import Agent
 from meadow.agent.controller import ControllerAgent
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent, parse_sql_response
 from meadow.agent.data_agents.text2sql_utils import check_empty_table
-from meadow.agent.exectors.reask import ReaskExecutorAgent
+from meadow.agent.exectors.reask import ReaskExecutor
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
 from meadow.cache import DuckDBCache
@@ -37,14 +37,14 @@ def get_simple_text2sql_agent(
         llm_config=llm_config,
         database=database,
         executors=[
-            ReaskExecutorAgent(
+            ReaskExecutor(
                 client=None,
                 llm_config=llm_config,
                 database=database,
                 execution_func=parse_sql_response,
                 max_execution_attempts=0,
             ),
-            ReaskExecutorAgent(
+            ReaskExecutor(
                 client=None,
                 llm_config=None,
                 database=database,

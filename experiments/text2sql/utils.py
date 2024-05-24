@@ -11,6 +11,7 @@ import textdistance
 
 from meadow.client.client import Client
 from meadow.database.connector.connector import Column, Table
+from meadow.database.connector.sqlite import SQLiteConnector
 from meadow.database.database import Database
 
 
@@ -27,6 +28,7 @@ def load_data(path: str) -> list[dict]:
 
 def read_tables_json(
     schema_file: str,
+    database_path: str,
     lowercase: bool = False,
 ) -> dict[str, dict[str, Table]]:
     """Read tables json."""
@@ -34,6 +36,10 @@ def read_tables_json(
     db_to_tables = {}
     for db in data:
         db_name = db["db_id"]
+        db_path = f"{database_path}/{db_name}/{db_name}.sqlite"
+        connector = SQLiteConnector(db_path)
+        connector.connect()
+
         table_names = db["table_names_original"]
         db["column_names_original"] = [
             [x[0], x[1]] for x in db["column_names_original"]
@@ -41,11 +47,16 @@ def read_tables_json(
         db["column_types"] = db["column_types"]
         if lowercase:
             table_names = [tn.lower() for tn in table_names]
+
+        data_sample_query = "SELECT DISTINCT * FROM {} LIMIT 5"
+        dfs = [
+            connector.run_sql_to_df(data_sample_query.format(tn))
+            for tn in table_names
+        ]
+
         pks = db["primary_keys"]
         fks = db["foreign_keys"]
         tables = defaultdict(list)
-        tables_pks = defaultdict(list)
-        tables_fks = defaultdict(list)
         for idx, ((ti, col_name), col_type) in enumerate(
             zip(db["column_names_original"], db["column_types"])
         ):
@@ -54,6 +65,7 @@ def read_tables_json(
             if lowercase:
                 col_name = col_name.lower()
                 col_type = col_type.lower()
+
             foreign_keys = []
             for fk in fks:
                 if idx == fk[0]:
@@ -72,12 +84,11 @@ def read_tables_json(
             table_name: Table(
                 name=table_name,
                 columns=tables[table_name],
-                pks=tables_pks[table_name],
-                fks=tables_fks[table_name],
-                examples=None,
+                data=dfs[i].to_dict(orient="records"),
             )
-            for table_name in tables
+            for i, table_name in enumerate(tables)
         }
+    del connector
     return db_to_tables
 
 
@@ -164,6 +175,10 @@ def execution_accuracy(
 ) -> tuple[float, float]:
     """Evaluate execution accuracy for one example."""
     final_score = 0
+    if "2014" in gold:
+        print("HERE")
+    if "Level_of_membership  >  4" in gold:
+        print("HERE")
     assert gold, "Gold SQL is empty"
     if not pred:
         return 0, 0

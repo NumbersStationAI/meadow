@@ -1,6 +1,7 @@
 """Run agents on text2sql."""
 
 import asyncio
+import copy
 import datetime
 import json
 import random
@@ -55,6 +56,7 @@ async def agenerate_sql(
     client: Client,
     planner_client: Client,
     llm_config: LLMConfig,
+    real_tables: dict[str, dict[str, Table]] | None,
     overwrite_cache: bool,
     # all_prompts_db: duckdb.DuckDBPyConnection,
 ) -> tuple[list[Agent], list[list[PromptLog]]]:
@@ -70,7 +72,9 @@ async def agenerate_sql(
         else:
             connector = DuckDBConnector(text_to_sql.database_path)
         database = Database(connector=connector)
-
+        # hack to use the given schema information in benchmarks if available
+        if real_tables:
+            database._base_tables = copy.deepcopy(real_tables[text_to_sql.db_id])
         # load "user" agent
         user_agent = EvalUserAgent(
             name="User",
@@ -150,10 +154,10 @@ async def agenerate_sql(
         agents_gather.append(agent)
         instruction = text_to_sql.instruction
 
-        message = AgentMessage(
-            role="user", content=instruction, generating_agent=user_agent.name
-        )
-        text_to_sql_for_gather.append(agent.receive(message, user_agent))
+        # message = AgentMessage(
+        #     role="user", content=instruction, sending_agent=user_agent.name
+        # )
+        text_to_sql_for_gather.append(agent.initiate_chat(instruction))
     await asyncio.gather(*text_to_sql_for_gather)
     return agents_gather, all_prompts_to_save
 
@@ -163,13 +167,15 @@ def generate_sql(
     client: Client,
     planner_client: Client,
     llm_config: LLMConfig,
+    real_tables: dict[str, dict[str, Table]],
     overwrite_cache: bool,
     async_batch_size: int,
 ) -> tuple[list[tuple[str, str]], list[list[PromptLog]]]:
     """Ask agent to generate SQL."""
     # Batch inputs for asyncio
     # REMOVE ME
-    # text_to_sql_in = text_to_sql_in[0:1]
+    # text_to_sql_in = text_to_sql_in[0:2]
+    # text_to_sql_in = [t for t in text_to_sql_in if "Show location and name for all stadiums with a capacity between 5000 and 10000" in t.instruction]
     text_to_sql_in_batches = [
         text_to_sql_in[i : i + async_batch_size]
         for i in range(0, len(text_to_sql_in), async_batch_size)
@@ -183,6 +189,7 @@ def generate_sql(
                 client=client,
                 planner_client=planner_client,
                 llm_config=llm_config,
+                real_tables=real_tables,
                 overwrite_cache=overwrite_cache,
             )
         )
@@ -208,19 +215,25 @@ def generate_sql(
                 last_sql_message = msg
                 break
         if last_sql_message is None:
-            print("DID NOT FIND SQL FOR", [msg.content[:50] for msg in messages])
+            print("DID NOT FIND SQL FOR")
+            for msg in messages:
+                print(msg.content[:200])
             sql = ""
             tbl = ""
         else:
             sql = (
-                last_sql_message.display_content.split("Table:")[0]
+                last_sql_message.display_content.split("\n\n")[0]
                 .strip()[len("SQL:") :]
                 .strip()
             )
             # noramlize sql with the views
             database: Database = agent._planner._database
             sql = database.normalize_query(sql)
-            tbl = last_sql_message.display_content.split("Table:")[1].strip()
+            if "Table:" in last_sql_message.display_content:
+                tbl = last_sql_message.display_content.split("Table:")[1].split("Warning:")[0].strip()
+            else:
+                tbl = ""
+        # print("FINAL SQL", sql, "\n\n", tbl)
         sql_responses.append((sql, tbl))
 
     assert len(sql_responses) == len(text_to_sql_in)
@@ -269,6 +282,7 @@ def cli() -> None:
 @click.option("--async-batch-size", type=int, default=20)
 # Data options
 @click.option("--lowercase-schema", is_flag=True, default=False)
+@click.option("--use-table-schema", is_flag=True, default=False)
 # Agent options
 @click.option("--agent-type", type=str, default="text2sql")
 # Model options
@@ -297,6 +311,7 @@ def predict(
     num_print: int,
     async_batch_size: int,
     lowercase_schema: bool,
+    use_table_schema: bool,
     agent_type: str,
     max_tokens: int,
     temperature: float,
@@ -319,6 +334,7 @@ def predict(
     llm_config = LLMConfig(
         temperature=temperature,
         max_tokens=max_tokens,
+        seed=0,
     )
     cache = DuckDBCache(client_cache_path)
     if api_provider == "anthropic":
@@ -346,7 +362,7 @@ def predict(
     )
 
     console.print("Loading metadata...")
-    db_to_tables = read_tables_json(table_meta_path, lowercase=lowercase_schema)
+    db_to_tables = read_tables_json(table_meta_path, database_path, lowercase=lowercase_schema)
 
     console.print("Loading data...")
     data = load_data(dataset_path)
@@ -388,6 +404,7 @@ def predict(
                 client=client,
                 planner_client=planner_client,
                 llm_config=llm_config,
+                real_tables=db_to_tables if use_table_schema else None,
                 overwrite_cache=overwrite_cache,
                 async_batch_size=async_batch_size,
             )
@@ -410,6 +427,7 @@ def predict(
             client=client,
             planner_client=planner_client,
             llm_config=llm_config,
+            real_tables=db_to_tables if use_table_schema else None,
             overwrite_cache=overwrite_cache,
             async_batch_size=async_batch_size,
         )

@@ -96,7 +96,9 @@ class ExecutorAgent(LLMAgent):
 
     @property
     @abstractmethod
-    def execution_func(self) -> Callable[[str, str, Database], AgentMessage]:
+    def execution_func(
+        self,
+    ) -> Callable[[list[AgentMessage], str, Database, bool], AgentMessage]:
         """The execution function of this agent."""
         ...
 

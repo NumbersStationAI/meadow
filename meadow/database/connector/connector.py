@@ -14,9 +14,6 @@ class Column(BaseModel):
     data_type: str | None = None
     """Data type of the column."""
 
-    sample_values: list[Any] | None = None
-    """Sample values in the column."""
-
     primary_key: bool = False
     """Whether this column is a primary key"""
 
@@ -36,11 +33,27 @@ class Table(BaseModel):
     is_view: bool = False
     """If view or not."""
 
+    is_draft: bool = False
+    """If the view is a draft or not.
+
+    Draft mode is when an executor is iterating on a view
+    but it is not finalized yet. Finalized means it will appear
+    in the schema.
+    """
+
     columns: list[Column] | None = None
     """Columns in the table if base table."""
 
+    data: list[dict] | None = None
+    """Data."""
+
     view_sql: str | None = None
     """View sql definition if view."""
+
+    class Config:
+        """Pydantic configuration."""
+
+        extra = "forbid"
 
     @model_validator(mode="after")
     def check_valid_view_or_base_table(self) -> "Table":
@@ -49,6 +62,13 @@ class Table(BaseModel):
             raise ValueError("View must have view_sql defined.")
         if not self.is_view and not self.columns:
             raise ValueError("Base table must have columns defined.")
+        return self
+
+    @model_validator(mode="after")
+    def check_only_view_is_draft(self) -> "Table":
+        """Check that only views can be drafts."""
+        if self.is_draft and not self.is_view:
+            raise ValueError("Only views can be drafts.")
         return self
 
 
