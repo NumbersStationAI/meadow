@@ -17,8 +17,8 @@ class Column(BaseModel):
     primary_key: bool = False
     """Whether this column is a primary key"""
 
-    foreign_keys: list[tuple[str, str]] | None = None
-    """The table and column name this column references"""
+    foreign_keys: list[tuple[str, int]] | None = None
+    """The table name and column index this column references"""
 
 
 class Table(BaseModel):
@@ -39,6 +39,14 @@ class Table(BaseModel):
     Draft mode is when an executor is iterating on a view
     but it is not finalized yet. Finalized means it will appear
     in the schema.
+    """
+
+    is_deprecated: bool = False
+    """If the table is deprecated or not.
+
+    Deprecated tables are not shown in the schema or used.
+
+    Deprecated tables are mainly base tables that were remapping or renamed.
     """
 
     columns: list[Column] | None = None
@@ -69,6 +77,13 @@ class Table(BaseModel):
         """Check that only views can be drafts."""
         if self.is_draft and not self.is_view:
             raise ValueError("Only views can be drafts.")
+        return self
+
+    @model_validator(mode="after")
+    def check_only_base_table_deprecated(self) -> "Table":
+        """Check that only base tables can be deprecated."""
+        if self.is_deprecated and self.is_view:
+            raise ValueError("Only base tables can be deprecated.")
         return self
 
 

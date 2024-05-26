@@ -1,4 +1,4 @@
-"""Planner agent."""
+"""SQL decomposer agent."""
 
 import json
 import logging
@@ -13,6 +13,7 @@ from meadow.agent.agent import (
     LLMPlannerAgent,
     SubTask,
 )
+from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
 from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.utils import (
     generate_llm_reply,
@@ -26,32 +27,20 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
+DEFAULT_SQL_DECOMP_PROMPT = """The user wants to answer an analytics question in SQL.
 
-For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
+Based on the following question provided by the user, please make a plan consisting of a minimal sequence of SQL-queries using SQL Generator agent. The SQL Generator generates a single SQL query based on the given user instructions.
 
-<steps>
-<step1>
-<agent>...</agent>
-<instruction>...</instruction>
-</step1>
-<step2>
+For each SQL in the sequence, generate a text instruction for the SQL Generator to follow. To reference a past step (e.g. to reference step 2, please use the phrase `sql2` in the instruction). When generating a plan, please use the following tag format to specify the plan.
+
+<instruction1>...</instruction1>
+<instruction2>...</instruction2>
 ...
-</step2>
-...
-</steps>
-
-If the user responds back at some point with a message that indicates the user is satisfied with the plan, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
-
-You have access to the following agents.
-
-<agents>
-{agents}
-</agents>
 
 Below is the data schema the user is working with.
 {serialized_schema}
-"""
+
+Please keep the plan simple and use as few steps as possible. Be very explicit about which columns should be selected at the end. Only select exactly what the user asks and nothing more."""
 
 
 class SubTaskForParse(BaseModel):
@@ -61,104 +50,54 @@ class SubTaskForParse(BaseModel):
     prompt: str
 
 
-def parse_replacements_in_instruction(instruction: str) -> list[str]:
-    """Parse the agent name in the instruction."""
-    instruction_replacements = re.findall(r"\{(.*?)\}", instruction)
-    if len(instruction_replacements) == 0:
-        return []
-    return instruction_replacements
-
-
-def swap_instruction_replacements_with_agent_names(
-    parsed_plan: list[SubTaskForParse],
-) -> list[SubTaskForParse]:
-    """Replace {{stepXX}} with {{agentNameXX}} for use in the Controller so it knows what conversation to use."""
-    for i, sub_task in enumerate(parsed_plan):
-        instruction_replacements = parse_replacements_in_instruction(sub_task.prompt)
-        for to_replace in instruction_replacements:
-            task_i = re.search(r"\d+", to_replace).group(0)
-            if int(task_i) >= len(parsed_plan):
-                raise ValueError(
-                    f"Step {task_i} is not yet defined for replacement in step {i}."
-                )
-            parsed_plan[i].prompt = parsed_plan[i].prompt.replace(
-                f"{{{to_replace}}}", f"{{{parsed_plan[int(task_i) - 1].agent_name}}}"
-            )
-    return parsed_plan
-
-
 def parse_steps(input_str: str) -> list[tuple[str, str]]:
     """
-    Parse the given XML-like string and extract agent, instruction pairs using regular expressions.
+    Parse the given XML-like string and extract instruction using regular expressions.
     """
     # Use '.*' after last instruction because sometimes it'll add extra pieces we don't care about
     pattern = re.compile(
-        r"<step\d*>\s*<agent>(.*?)</agent>\s*<instruction>(.*?)</instruction>.*?</step\d*>",
+        r"<instruction\d*>(.*?)</instruction\d*>",
         re.DOTALL,
     )
     matches = pattern.findall(input_str)
-    return [(agent.strip(), instruction.strip()) for agent, instruction in matches]
+    return [instruction.strip() for instruction in matches]
 
 
 def parse_plan(
     message: str,
     agent_name: str,
-    available_agents: dict[str, Agent],
+    agent_to_use: str = "SQLGenerator",
 ) -> AgentMessage:
-    """Extract the plan from the response.
-
-    Plan follows
-    <steps>
-    <step1>
-    <agent>...</agent>
-    <instruction>...</instruction>
-    </step1>
-    ...
-    </steps>.
-    """
-    if message.endswith("</steps"):
-        message += ">"
-    if "<steps>" not in message:
-        raise ValueError(f"Plan not found in the response. message={message}")
-    inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
-    parsed_steps = parse_steps(inner_steps)
+    """Extract the plan from the response."""
+    parsed_steps = parse_steps(message)
     plan: list[SubTaskForParse] = []
-    for agent, instruction in parsed_steps:
-        if agent not in available_agents:
-            raise ValueError(
-                f"Agent {agent} not found in available agents. Please only use {', '.join(available_agents.keys())}"
-            )
-        if agent == "AttributeDetector" and "{" in instruction:
-            raise ValueError(
-                f"AttributeDetector agent cannot have any replacement tags in the instruction. instruction={instruction}"
-            )
-        plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
+    for instruction in parsed_steps:
+        plan.append(SubTaskForParse(agent_name=agent_to_use, prompt=instruction))
     return AgentMessage(
         role="assistant",
         content=json.dumps([m.model_dump() for m in plan]),
-        display_content=inner_steps,
+        display_content=message,
         tool_calls=None,
         sending_agent=agent_name,
         requires_response=False,
     )
 
 
-class PlannerAgent(LLMPlannerAgent):
-    """Agent that generates a plan for a task."""
+class SQLDecomposerAgent(LLMPlannerAgent):
+    """Agent that generates a plan for subsql tasks."""
 
     def __init__(
         self,
-        available_agents: list[Agent],
         client: Client | None,
         llm_config: LLMConfig | None,
         database: Database | None,
-        system_prompt: str = DEFAULT_PLANNER_PROMPT,
+        available_agents: list[Agent] = None,
+        system_prompt: str = DEFAULT_SQL_DECOMP_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
     ):
         """Initialize the planner agent."""
-        self._available_agents = {a.name: a for a in available_agents}
         self._client = client
         self._llm_config = llm_config
         self._database = database
@@ -169,15 +108,25 @@ class PlannerAgent(LLMPlannerAgent):
         self._llm_callback = llm_callback
         self._silent = silent
 
+        if available_agents is None:
+            available_agents = [
+                SQLGeneratorAgent(
+                    client=self._client,
+                    llm_config=self._llm_config,
+                    database=self._database,
+                )
+            ]
+        self._available_agents = {a.name: a for a in available_agents}
+
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "Planner"
+        return "MultiCTESQLGenerator"
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "Plans the task."
+        return "For heavily complex SQL queries that require multiple CTE expression, this agent decomposes the task into simpler sub queries that get joined together. This agent should be used instead of the simple SQLGenerator if the question is heavily complex."
 
     @property
     def llm_client(self) -> Client:
@@ -187,19 +136,9 @@ class PlannerAgent(LLMPlannerAgent):
     @property
     def system_message(self) -> str:
         """Get the system message."""
-        if self._database is not None:
-            serialized_schema = serialize_as_list(self._database.tables)
-        else:
-            serialized_schema = ""
+        serialized_schema = serialize_as_list(self._database.tables)
         return self._system_prompt.format(
             serialized_schema=serialized_schema,
-            termination_message=Commands.END,
-            agents="\n".join(
-                [
-                    f"<agent>\n{a.name}: {a.description}\n</agent>"
-                    for a in self._available_agents.values()
-                ]
-            ),
         )
 
     @property
@@ -275,7 +214,7 @@ class PlannerAgent(LLMPlannerAgent):
             content = chat_response.choices[0].message.content
             # print(self.system_message)
             print(messages[-1].content)
-            print("CONTENT PLANNER", content)
+            print("SQL DECOMP PLANNER", content)
             print("*****")
             if Commands.has_end(content):
                 return AgentMessage(
@@ -289,18 +228,15 @@ class PlannerAgent(LLMPlannerAgent):
                 display_content = None
                 try:
                     # TODO: refactor using executors
-                    parsed_plan_message = parse_plan(
-                        content, self.name, self._available_agents
-                    )
+                    parsed_plan_message = parse_plan(content, self.name)
                     display_content = parsed_plan_message.display_content
                     parsed_plan = [
                         SubTaskForParse(**m)
                         for m in json.loads(parsed_plan_message.content)
                     ]
-                    # Handle agent name swaps
-                    parsed_plan = swap_instruction_replacements_with_agent_names(
-                        parsed_plan
-                    )
+                    # If the plan is just a single step, replace with the direct question from the user with the attributes
+                    if len(parsed_plan) == 1:
+                        parsed_plan[0].prompt = messages[-1].content
                     for sub_task in parsed_plan:
                         self._plan.put(
                             SubTask(
@@ -323,11 +259,7 @@ class PlannerAgent(LLMPlannerAgent):
             if len(self._available_agents) > 1:
                 raise ValueError("No LLM client provided and more than one agent.")
             agent = list(self._available_agents.values())[0]
-            raw_content = (
-                messages[-1]
-                .content.replace("<objective>", "")
-                .replace("</objective>", "")
-            )
+            raw_content = messages[-1].content
             self._plan.put(SubTask(agent=agent, prompt=raw_content))
             serialized_plan = f"<steps><step1><agent>{agent.name}</agent><instruction>{raw_content}</instruction></step1></steps>"
             return AgentMessage(

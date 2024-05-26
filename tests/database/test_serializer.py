@@ -18,7 +18,7 @@ def tables() -> list[Table]:
                 Column(
                     name="email",
                     data_type="varchar",
-                    foreign_keys=[("emails", "email")],
+                    foreign_keys=[("emails", 0)],
                 ),
             ],
         ),
@@ -46,7 +46,7 @@ def tables_with_views() -> list[Table]:
                 Column(
                     name="email",
                     data_type="varchar",
-                    foreign_keys=[("emails", "email")],
+                    foreign_keys=[("emails", 0)],
                 ),
             ],
         ),

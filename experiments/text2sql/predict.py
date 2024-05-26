@@ -15,19 +15,10 @@ from pydantic import BaseModel
 from rich.console import Console
 from tqdm import tqdm
 
-from experiments.text2sql.agent_factory import (
-    PromptLog,
-    get_simple_text2sql_agent,
-    get_text2sql_llm_reask_agent,
-    get_text2sql_llm_reask_planner_agent,
-    get_text2sql_planner_agent,
-    get_text2sql_simple_reask_agent,
-    get_text2sql_simple_reask_planner_agent,
-)
+from experiments.text2sql.agent_factory import PromptLog, get_text2sql_agent
 from experiments.text2sql.eval_user import EvalUserAgent
 from experiments.text2sql.utils import load_data, read_tables_json
 from meadow.agent.agent import Agent
-from meadow.agent.schema import AgentMessage
 from meadow.cache.duckdb import DuckDBCache
 from meadow.client.api.anthropic import AnthropicClient
 from meadow.client.api.openai import OpenAIClient
@@ -46,9 +37,13 @@ class TextToSQLParams(BaseModel):
     """Text to SQL parameters."""
 
     instruction: str
-    agent_type: str
     db_id: str
     database_path: str
+    add_reask: bool = False
+    add_empty_table: bool = False
+    add_decomposer: bool = False
+    add_attribute_selector: bool = False
+    add_schema_cleaner: bool = False
 
 
 async def agenerate_sql(
@@ -83,80 +78,23 @@ async def agenerate_sql(
         )
 
         # load agent
-        if text_to_sql.agent_type == "text2sql":
-            agent = get_simple_text2sql_agent(
-                user_agent=user_agent,
-                client=client,
-                planner_client=planner_client,
-                llm_config=llm_config,
-                database=database,
-                overwrite_cache=overwrite_cache,
-                all_prompts_to_save=all_prompts_to_save,
-                example_idx=i,
-            )
-        elif text_to_sql.agent_type == "text2sql_with_planner":
-            agent = get_text2sql_planner_agent(
-                user_agent=user_agent,
-                client=client,
-                planner_client=planner_client,
-                llm_config=llm_config,
-                database=database,
-                overwrite_cache=overwrite_cache,
-                all_prompts_to_save=all_prompts_to_save,
-                example_idx=i,
-            )
-        elif text_to_sql.agent_type == "text2sql_with_simple_reask":
-            agent = get_text2sql_simple_reask_agent(
-                user_agent=user_agent,
-                client=client,
-                planner_client=planner_client,
-                llm_config=llm_config,
-                database=database,
-                overwrite_cache=overwrite_cache,
-                all_prompts_to_save=all_prompts_to_save,
-                example_idx=i,
-            )
-        elif text_to_sql.agent_type == "text2sql_with_simple_reask_planner":
-            agent = get_text2sql_simple_reask_planner_agent(
-                user_agent=user_agent,
-                client=client,
-                planner_client=planner_client,
-                llm_config=llm_config,
-                database=database,
-                overwrite_cache=overwrite_cache,
-                all_prompts_to_save=all_prompts_to_save,
-                example_idx=i,
-            )
-        elif text_to_sql.agent_type == "text2sql_with_llm_reask":
-            agent = get_text2sql_llm_reask_agent(
-                user_agent=user_agent,
-                client=client,
-                planner_client=planner_client,
-                llm_config=llm_config,
-                database=database,
-                overwrite_cache=overwrite_cache,
-                all_prompts_to_save=all_prompts_to_save,
-                example_idx=i,
-            )
-        elif text_to_sql.agent_type == "text2sql_with_llm_reask_planner":
-            agent = get_text2sql_llm_reask_planner_agent(
-                user_agent=user_agent,
-                client=client,
-                planner_client=planner_client,
-                llm_config=llm_config,
-                database=database,
-                overwrite_cache=overwrite_cache,
-                all_prompts_to_save=all_prompts_to_save,
-                example_idx=i,
-            )
-        else:
-            raise ValueError(f"Unknown agent type {text_to_sql.agent_type}")
+        agent = get_text2sql_agent(
+            user_agent=user_agent,
+            client=client,
+            planner_client=planner_client,
+            llm_config=llm_config,
+            database=database,
+            overwrite_cache=overwrite_cache,
+            all_prompts_to_save=all_prompts_to_save,
+            example_idx=i,
+            add_reask=text_to_sql.add_reask,
+            add_empty_table=text_to_sql.add_empty_table,
+            add_decomposer=text_to_sql.add_decomposer,
+            add_attribute_selector=text_to_sql.add_attribute_selector,
+            add_schema_cleaner=text_to_sql.add_schema_cleaner,
+        )
         agents_gather.append(agent)
         instruction = text_to_sql.instruction
-
-        # message = AgentMessage(
-        #     role="user", content=instruction, sending_agent=user_agent.name
-        # )
         text_to_sql_for_gather.append(agent.initiate_chat(instruction))
     await asyncio.gather(*text_to_sql_for_gather)
     return agents_gather, all_prompts_to_save
@@ -242,9 +180,13 @@ def generate_sql(
 
 def get_text_to_sql_in(
     input_question: dict,
-    agent_type: str,
     db_to_tables: dict[str, dict[str, Table]],
     database_path: Path,
+    add_reask: bool,
+    add_empty_table: bool,
+    add_decomposer: bool,
+    add_attribute_selector: bool,
+    add_schema_cleaner: bool,
 ) -> TextToSQLParams:
     """Format input question for text2sql function."""
     question = input_question["question"]
@@ -257,9 +199,13 @@ def get_text_to_sql_in(
 
     text_to_sql_in = TextToSQLParams(
         instruction=question,
-        agent_type=agent_type,
         db_id=db_id,
         database_path=str(possible_db_path),
+        add_reask=add_reask,
+        add_empty_table=add_empty_table,
+        add_decomposer=add_decomposer,
+        add_attribute_selector=add_attribute_selector,
+        add_schema_cleaner=add_schema_cleaner,
     )
     return text_to_sql_in
 
@@ -284,7 +230,11 @@ def cli() -> None:
 @click.option("--lowercase-schema", is_flag=True, default=False)
 @click.option("--use-table-schema", is_flag=True, default=False)
 # Agent options
-@click.option("--agent-type", type=str, default="text2sql")
+@click.option("--add-reask", is_flag=True, default=False)
+@click.option("--add-empty-table", is_flag=True, default=False)
+@click.option("--add-decomposer", is_flag=True, default=False)
+@click.option("--add-attribute-selector", is_flag=True, default=False)
+@click.option("--add-schema-cleaner", is_flag=True, default=False)
 # Model options
 @click.option("--max-tokens", type=int, default=1000)
 @click.option("--temperature", type=float, default=0)
@@ -312,7 +262,11 @@ def predict(
     async_batch_size: int,
     lowercase_schema: bool,
     use_table_schema: bool,
-    agent_type: str,
+    add_reask: bool,
+    add_empty_table: bool,
+    add_decomposer: bool,
+    add_attribute_selector: bool,
+    add_schema_cleaner: bool,
     max_tokens: int,
     temperature: float,
     api_provider: str,
@@ -377,9 +331,13 @@ def predict(
     text_to_sql_in = [
         get_text_to_sql_in(
             input_question=input_question,
-            agent_type=agent_type,
             db_to_tables=db_to_tables,
             database_path=Path(database_path),
+            add_reask=add_reask,
+            add_empty_table=add_empty_table,
+            add_decomposer=add_decomposer,
+            add_attribute_selector=add_attribute_selector,
+            add_schema_cleaner=add_schema_cleaner,
         )
         for input_question in data
     ]
@@ -390,8 +348,17 @@ def predict(
     date_today = datetime.datetime.now().strftime("%y-%m-%d")
     if run_name:
         run_name = f"{run_name}_"
+
+    agent_type_str = (
+        ("reask_" if add_reask else "") + 
+        ("empty_" if add_empty_table else "") + 
+        ("decomposer_" if add_decomposer else "") + 
+        ("attribute_" if add_attribute_selector else "") + 
+        ("cleaner_" if add_schema_cleaner else "")
+    )
+    agent_type_str = agent_type_str.rstrip("_")
     suffix = f"{run_name}{full_dataset_path.stem}_{date_today}.json"  # noqa: E501
-    prefix = f"{agent_type}_{model}_{planner_model}"
+    prefix = f"{agent_type_str}_{model}_{planner_model}"
     output_filename = f"{prefix}_{suffix}"
     console.print(f"Saving to {Path(output_dir) / output_filename}")
     Path(output_dir).mkdir(parents=True, exist_ok=True)

@@ -1,19 +1,12 @@
-"""SQL Generator Agent."""
+"""Agent that cleans and renames DB schemas."""
 
+import json
 import logging
 from typing import Callable
 
-from meadow.agent.agent import (
-    Agent,
-    AgentRole,
-    ExecutorAgent,
-    LLMAgentWithExecutors,
-)
-from meadow.agent.executor.contrib.empty_result_debugger import EmptyResultExecutor
-from meadow.agent.executor.contrib.sql_validate_reask import (
-    SQLValidateExecutor,
-)
-from meadow.agent.schema import AgentMessage, Commands
+from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
+from meadow.agent.executor.reask import ReaskExecutor
+from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -26,18 +19,68 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQL_PROMPT = """You generate SQLite SQL queries and are a SQLite expert. Given the table schema and user's question, generate a SQLite SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
+DEFAULT_RENAME_PROMPT = """Your goal is to clean up a schema to make detecting joins and understanding the data easier for asking queries. You can rename the tables and columns as you see fit.
 
-1. Feel free to think through what you need to do first.
-2. Use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
-3. Then <description></description> tags for a one sentence description of what the SQL query captures. Be concise.
-4. Please use `FROM sqlXXX` to refer to the SQL query number XXX in the prompt. For example, if sql2 is in the schema from a prior step, please use `FROM sql2` to refer to that query.
+The user will give you a schema and you need to output a column name remapping for any column that needs a more description or useful name. Join columns should ideally be the same name, for example. You can also keep the schema the same if you want.
 
-The user's schema is:
-{schema}"""
+Output the remapping in JSON in the following format:
+
+{
+  "table_name": {
+    "old_column1_name": "new_column1_name",
+    "old_column2_name": "new_column2_name",
+    ...
+  },
+  "table_name": {
+    "old_column2_name": "new_column1_name",
+    ...
+  },
+}
+
+The names can be the same if you want. Just output any changes you would like.
+"""
 
 
-class SQLGeneratorAgent(LLMAgentWithExecutors):
+def parse_rename_and_update_db(
+    messages: list[AgentMessage],
+    agent_name: str,
+    database: Database,
+    can_reask_again: bool,
+) -> AgentMessage:
+    """Parse the message and update the database."""
+    content = messages[-1].content
+    error_message: str = None
+    try:
+        content: dict[str, dict[str, str]] = json.loads(content)
+    except json.JSONDecodeError as e:
+        error_message = f"The content is not a valid JSON object.\n{e}"
+
+    if not error_message:
+        for table_name, column_mapping in content.items():
+            try:
+                database.add_base_table_column_remap(table_name, column_mapping)
+            except Exception as e:
+                error_message = (
+                    f"Error adding the column remapping for table {table_name}.\n{e}"
+                )
+                break
+
+    if error_message:
+        return AgentMessage(
+            role="assistant",
+            content=error_message + "Please regenerate mapping and try again.",
+            requires_response=True,
+            sending_agent=agent_name,
+        )
+
+    return AgentMessage(
+        role="assistant",
+        content="The schema has been updated.",
+        sending_agent=agent_name,
+    )
+
+
+class SchemaRenamerAgent(LLMAgentWithExecutors):
     """Agent that generates SQL queries from user questions."""
 
     def __init__(
@@ -46,7 +89,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         llm_config: LLMConfig,
         database: Database,
         executors: list[ExecutorAgent] = None,
-        system_prompt: str = DEFAULT_SQL_PROMPT,
+        system_prompt: str = DEFAULT_RENAME_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -54,6 +97,10 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         """Initialize the SQL generator agent."""
         self._client = client
         self._llm_config = llm_config
+        if system_prompt == DEFAULT_RENAME_PROMPT:
+            # Response format should be a JSON object for the output
+            self._llm_config = self._llm_config.model_copy()
+            self._llm_config.response_format = {"type": "json_object"}
         self._database = database
         self._executors = executors
         self._system_prompt = system_prompt
@@ -65,30 +112,25 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
 
         if self._executors is None:
             self._executors = [
-                SQLValidateExecutor(
-                    client=self._client,
-                    llm_config=self._llm_config,
+                ReaskExecutor(
+                    client=None,
+                    llm_config=None,
                     database=self._database,
+                    execution_func=parse_rename_and_update_db,
                     llm_callback=self._llm_callback,
-                ),
-                EmptyResultExecutor(
-                    client=self._client,
-                    llm_config=self._llm_config,
-                    database=self._database,
-                    llm_callback=self._llm_callback,
-                ),
+                )
             ]
 
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "SQLGenerator"
+        return "SchemaRenamer"
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        # return "Generates a single SQL query based on the given user instruction. Each instruction should be a detailed description of what attributes, aggregates, filter conditions, tables, and joins are needed in the SQL query along with any custom functions that are needed (e.g. ROW_NUMBER, RANK, LAG, ...)."
-        return "Generates a single SQL query based on the given user instruction. For queries requiring joins and at most one CTE, this agent is the optimal one to use. If the query requires more than one CTE, consider using the MultiCTESQLGenerator agent."
+        return "This agent renames columns to be more standard and useful for determining the right attributes and detecting joins. Most schemas need some cleaning unless the attributes are already very clear. The input instruction should be the phrase 'clean schema'. Do not pass the output of this agent to any other agent. Generate fresh instructions for future agents in the plan."
+        # return "Always use this agent first before any other agent to clean the schema. It must be used in all plans. The instruction should be <instruction>clean schema</instruction>. Do not pass the output of this agent to any other agent. Generate fresh instructions for next agents."
 
     @property
     def llm_client(self) -> Client:
@@ -103,12 +145,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
     @property
     def system_message(self) -> str:
         """Get the system message."""
-        serialized_schema = serialize_as_list(self.database.tables)
-        return self._system_prompt.format(
-            schema=serialized_schema,
-            termination_message=Commands.END,
-            dialect="SQLite",
-        )
+        return self._system_prompt
 
     def set_chat_role(self, role: AgentRole) -> None:
         """Set the chat role of the agent.
@@ -159,15 +196,11 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply when Executor agent."""
-        messages_start_idx = -1
-        while (
-            abs(messages_start_idx) <= len(messages)
-            and messages[messages_start_idx].requires_response
-        ):
-            messages_start_idx -= 2
-        messages = messages[messages_start_idx:]
-        # print(messages_start_idx, "STARTING")
-        messages[0].content = messages[0].content
+        # The first message should be the schema
+        messages[0].content = (
+            "My schema is\n" + serialize_as_list(self.database.tables)
+            # + "\n\nPlease output the remapping in JSON format."
+        )
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -182,25 +215,15 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        if "```sql" in content:
-            if "<sql>" in content:
-                content = content.replace("```sql", "").replace("```", "")
-            else:
-                content = content.replace("```sql", "<sql>").replace("```", "</sql>")
-        if content.endswith("<end>") and "<sql" in content:
-            content = content.replace("<end>", "")
-        if messages_start_idx < 1:
-            # print(self.system_message)
-            for msg in messages:
-                print(msg.role)
-                print(msg.content)
-                print("---------")
-            print("SQL AGENT CONTENT", content)
-            print("*****")
+        print("CLEANER")
+        print(self.system_message)
+        print(messages[-1].content)
+        print("RESOPNSE")
+        print(content)
+        print("-----")
         return AgentMessage(
             role="assistant",
             content=content,
-            tool_calls=None,
             sending_agent=self.name,
             requires_execution=True,
         )

@@ -29,6 +29,11 @@ def parse_sqls(message: str) -> list[str]:
     sqls = []
     for sql_pair in sql_components:
         sql_with_tag, sql = sql_pair
+        sql_lines = sql.split("\n")
+        # Remove comments
+        sql = "\n".join(
+            [line.strip() for line in sql_lines if not line.strip().startswith("--")]
+        )
         sql = sql.replace(";", "").strip()
         sqls.append(sql)
     return sqls

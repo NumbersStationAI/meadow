@@ -20,8 +20,9 @@ def serialize_as_xml(tables: list[Table]) -> str:
                     xml_line += f"\n      <dataType>{column.data_type}</dataType>"
                 xml_line += f"\n      <primaryKey>{column.primary_key}</primaryKey>"
                 if column.foreign_keys:
-                    for fk_table, fk_column in column.foreign_keys:
-                        xml_line += f'\n      <foreignKey references="{fk_table}({fk_column})></foreignKey>'
+                    for fk_table, fk_column_idx in column.foreign_keys:
+                        fk_table_obj = [t for t in tables if t.name == fk_table][0]
+                        xml_line += f'\n      <foreignKey references="{fk_table}({fk_table_obj.columns[fk_column_idx].name})></foreignKey>'
                 xml_line += "\n    </column>"
                 xml_parts.append(xml_line)
         xml_parts.append(f"    <view>{table.is_view}</view>")
@@ -67,8 +68,9 @@ def serialize_as_list(
                 # if column.primary_key:
                 #     serialized_table += f"\n#    PRIMARY KEY({column.name})"
                 if column.foreign_keys:
-                    for fk_table, fk_column in column.foreign_keys:
-                        join_str += f"\n#    {table.name}.{column.name} = {fk_table}.{fk_column}"
+                    for fk_table, fk_column_idx in column.foreign_keys:
+                        fk_table_obj = [t for t in tables if t.name == fk_table][0]
+                        join_str += f"\n#    {table.name}.{column.name} = {fk_table}.{fk_table_obj.columns[fk_column_idx].name}"
             if join_str:
                 serialized_table += "\n#    Joins:" + join_str
         serialized_tables.append(serialized_table)
