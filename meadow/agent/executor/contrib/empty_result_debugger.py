@@ -21,7 +21,7 @@ Action: Query/Edit/Do Nothing
 Input: ```Input to action in quotes```
 ---
 
-Often, a good first step is to SELECT * from a table to see all the values and attributes in the table. Incorrect filters or values can be identified this way.
+Often, a good first step is to SELECT * ... LIMIT 100 from a table to see all the values and attributes in the table. Incorrect filters or values can be identified this way, but you may need to be more creative if the table is very large.
 
 The user will provide the response and you two will collectively iterate on the issue until it is resolved. Your final goal is to edit the SQL to be correct or do nothing. If you would like, please plan the action to take before outputting the action in the format above."""
 

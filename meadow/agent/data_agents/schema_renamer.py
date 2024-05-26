@@ -37,8 +37,7 @@ Output the remapping in JSON in the following format:
   },
 }
 
-The names can be the same if you want. Just output any changes you would like.
-"""
+Make sure all new column names are unique."""
 
 
 def parse_rename_and_update_db(
@@ -55,6 +54,19 @@ def parse_rename_and_update_db(
     except json.JSONDecodeError as e:
         error_message = f"The content is not a valid JSON object.\n{e}"
 
+    for tbl, col_map in content.items():
+        # Find any duplicate col map values
+        if len(set(col_map.values())) != len(col_map.values()):
+            # Find the exact duplicate value
+            duplicate_values = set()
+            for value in col_map.values():
+                if value in duplicate_values:
+                    error_message = (
+                        f"Duplicate column name '{value}' found in table '{tbl}'."
+                    )
+                    break
+                duplicate_values.add(value)
+
     if not error_message:
         for table_name, column_mapping in content.items():
             try:
@@ -68,7 +80,7 @@ def parse_rename_and_update_db(
     if error_message:
         return AgentMessage(
             role="assistant",
-            content=error_message + "Please regenerate mapping and try again.",
+            content=error_message + " Please regenerate mapping and try again.",
             requires_response=True,
             sending_agent=agent_name,
         )
@@ -215,12 +227,11 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        print("CLEANER")
-        print(self.system_message)
-        print(messages[-1].content)
-        print("RESOPNSE")
-        print(content)
-        print("-----")
+        # print("CLEANER")
+        # print(messages[-1].content)
+        # print("RESOPNSE")
+        # print(content)
+        # print("-----")
         return AgentMessage(
             role="assistant",
             content=content,

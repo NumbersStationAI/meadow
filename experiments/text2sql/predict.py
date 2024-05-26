@@ -113,7 +113,7 @@ def generate_sql(
     # Batch inputs for asyncio
     # REMOVE ME
     # text_to_sql_in = text_to_sql_in[0:2]
-    # text_to_sql_in = [t for t in text_to_sql_in if "Show location and name for all stadiums with a capacity between 5000 and 10000" in t.instruction]
+    # text_to_sql_in = [t for t in text_to_sql_in if "flight_2" in t.db_id]
     text_to_sql_in_batches = [
         text_to_sql_in[i : i + async_batch_size]
         for i in range(0, len(text_to_sql_in), async_batch_size)

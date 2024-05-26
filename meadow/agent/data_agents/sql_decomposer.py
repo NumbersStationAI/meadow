@@ -40,7 +40,7 @@ For each SQL in the sequence, generate a text instruction for the SQL Generator 
 Below is the data schema the user is working with.
 {serialized_schema}
 
-Please keep the plan simple and use as few steps as possible. Be very explicit about which columns should be selected at the end. Only select exactly what the user asks and nothing more."""
+Please keep the plan simple and use as few steps as possible. The last instruction should specifically say what the final attributes are. The last instruction tag should end with a sentence starting with "The final attributes should be"... and then provide the attributes."""
 
 
 class SubTaskForParse(BaseModel):
@@ -213,7 +213,7 @@ class SQLDecomposerAgent(LLMPlannerAgent):
             )
             content = chat_response.choices[0].message.content
             # print(self.system_message)
-            print(messages[-1].content)
+            # print(messages[-1].content)
             print("SQL DECOMP PLANNER", content)
             print("*****")
             if Commands.has_end(content):

@@ -189,14 +189,14 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
                 content = content.replace("```sql", "<sql>").replace("```", "</sql>")
         if content.endswith("<end>") and "<sql" in content:
             content = content.replace("<end>", "")
-        if messages_start_idx < 1:
-            # print(self.system_message)
-            for msg in messages:
-                print(msg.role)
-                print(msg.content)
-                print("---------")
-            print("SQL AGENT CONTENT", content)
-            print("*****")
+        # if messages_start_idx < 1:
+        #     print(self.system_message)
+        #     for msg in messages:
+        #         print(msg.role)
+        #         print(msg.content)
+        #         print("---------")
+        #     print("SQL AGENT CONTENT", content)
+        #     print("*****")
         return AgentMessage(
             role="assistant",
             content=content,

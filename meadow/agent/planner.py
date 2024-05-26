@@ -274,7 +274,7 @@ class PlannerAgent(LLMPlannerAgent):
             )
             content = chat_response.choices[0].message.content
             # print(self.system_message)
-            print(messages[-1].content)
+            # print(messages[-1].content)
             print("CONTENT PLANNER", content)
             print("*****")
             if Commands.has_end(content):

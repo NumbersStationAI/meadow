@@ -302,15 +302,8 @@ class ControllerAgent(Agent):
         message = AgentMessage(
             role="user", content=input, sending_agent=self._supervisor.name
         )
-        # print("STARTING CHAT WITH ", message, "TO", self._supervisor)
         await self.receive(message, self._supervisor)
         all_messages = self._messages.get_messages_linearly_by_time()
-        # Find last message that isn't with end tags
-        # It's okay if the last message is a termination message, it can still have
-        # content. We want to avoid the end tags.
-        # for msg in all_messages:
-        #     print("MSG SUP", msg.content, "\n\n----\n\n", msg.display_content)
-        #     print()
         print("CHAT RESPONSE", self.name, "SUP", self._supervisor.name)
         for message in reversed(all_messages):
             if not Commands.has_end(message.content) and not Commands.has_next(

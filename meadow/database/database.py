@@ -103,7 +103,11 @@ def add_base_table_remaps_as_ctes(
         parsed.args["with"].args["expressions"].extend(
             existing_ctes.args["expressions"]
         )
-    parsed = eliminate_ctes(parsed)
+    try:
+        parsed = eliminate_ctes(parsed)
+    except Exception as e:
+        logger.warning(f"Failed to eliminate CTEs. sql={sql}, e={e}")
+        pass
 
     return parsed.sql(dialect=dialect, pretty=True)
 
@@ -130,7 +134,10 @@ def extract_columns_from_df(df: pd.DataFrame) -> list[Column]:
     """Extract columns from the dataframe."""
     columns = []
     for column_name in df.columns:
-        data_type = df[column_name].dtype.name
+        if len(df[column_name].shape) == 2 and df[column_name].shape[1] > 1:
+            data_type = df[column_name].iloc[:, 0].dtype.name
+        else:
+            data_type = df[column_name].dtype.name
         sql_dtype = map_dtype_to_sql(data_type)
         columns.append(Column(name=column_name, data_type=sql_dtype))
     return columns
@@ -224,9 +231,14 @@ class Database:
         df = None
         try:
             df = self.run_sql_to_df(sql)
+        except Exception as e:
+            logger.error(f"Failed to run view sql. sql={sql}, e={e}")
+            raise e
+        try:
             estimated_columns = extract_columns_from_df(df)
         except Exception as e:
             logger.error(f"Failed to extract columns from view sql. sql={sql}, e={e}")
+            raise e
         if not override and name in self._view_tables:
             raise ValueError(f"View already exists with name {name}")
         self._view_tables[name] = Table(

@@ -255,7 +255,7 @@ def check_empty_table(
             except Exception as e:
                 logger.warning(e)
                 pass
-        sql_df = database.run_sql_to_df(pretty_sql).head(10)
+        sql_df = database.run_sql_to_df(pretty_sql).head(100)
     except Exception as e:
         error_message = (
             f"Question: {final_description}\nFailed to parse SQL in response. e={e}"
@@ -284,7 +284,7 @@ def check_empty_table(
         else:
             if pretty_sql:
                 if sql_df is not None:
-                    failure_content = f"Question: {final_description}\nSQL:\n{pretty_sql}\n\nTable:\n{sql_df.to_string()}\n\nWarning:\n{error_message}"
+                    failure_content = f"Question: {final_description}\nSQL:\n{pretty_sql}\n\nTable:\n{sql_df.head(10).to_string()}\n\nWarning:\n{error_message}"
                 else:
                     failure_content = f"Question: {final_description}\nSQL:\n{pretty_sql}\n\nWarning:\n{error_message}"
             else:
@@ -310,7 +310,7 @@ def check_empty_table(
                 requires_response=False,
             )
     display_content = f"SQL:\n{pretty_sql}"
-    display_content += f"\n\nTable:\n{sql_df.to_string()}"
+    display_content += f"\n\nTable:\n{sql_df.head(10).to_string()}"
 
     return AgentMessage(
         role="assistant",
