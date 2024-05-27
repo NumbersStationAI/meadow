@@ -77,6 +77,8 @@ def parse_sql_response(
     error_message: str = None
     final_view_sql: str = None
     added_views = set()
+    if "SUM(oi.quantity * oi.unit_price) AS total_lifetime_spend" in content:
+        print("HERE")
     try:
         next_sql_id = f"sql{database.get_number_of_views() + 1}"
         sqls = parse_sqls(content)

@@ -26,35 +26,35 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PLANNER_PROMPT = """Below is the data schema the user is working with.
-{serialized_schema}
+# DEFAULT_PLANNER_PROMPT = """Below is the data schema the user is working with.
+# {serialized_schema}
 
-Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
+# Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
 
-For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. If you want to refer to a previous step, use 'stepXX'. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
+# For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. If you want to refer to a previous step, use 'stepXX'. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
 
-<steps>
-<step1>
-<agent>...</agent>
-<instruction>...</instruction>
-</step1>
-<step2>
-...
-</step2>
-...
-</steps>
+# <steps>
+# <step1>
+# <agent>...</agent>
+# <instruction>...</instruction>
+# </step1>
+# <step2>
+# ...
+# </step2>
+# ...
+# </steps>
 
-You have access to the following agents.
+# You have access to the following agents.
 
-<agents>
-{agents}
-</agents>
+# <agents>
+# {agents}
+# </agents>
 
-Out a single plan."""
+# Out a single plan."""
 
 DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
 
-For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
+For each sub-step in the sequence, indicate which agent should perform the task and generate a detailed instruction for the agent to follow. You can use an agent more than once. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
 
 <steps>
 <step1>
@@ -184,7 +184,20 @@ def parse_plan(
                 "SQLGenerator agent cannot be used in a plan with a NestedSQLGenerator agent. "
                 "Just use one NestedSQLGenerator agent to decompose the question."
             )
+        if agent == "SQLGenerator" and "SQLGenerator" in [p.agent_name for p in plan]:
+            raise ValueError(
+                "SQLGenerator agent can only be used once. Please rewrite to just have a single <agent>SQLGenerator</agent> in the plan."
+            )
         plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
+
+    for i, p in enumerate(plan):
+        if p.agent_name == "SQLPlanner" and not any(
+            f"{{step{i + 1}}}" in p.prompt for p in plan
+        ):
+            raise ValueError(
+                f"SQLPlanner agent's output must be used in a future step, but it is not. Please either remove the SQLPlanner or use it's output via {{step{i + 1}}}."
+            )
+
     return AgentMessage(
         role="assistant",
         content=json.dumps([m.model_dump() for m in plan]),
@@ -325,8 +338,8 @@ class PlannerAgent(LLMPlannerAgent):
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
-            print(self.system_message)
-            print(messages[-1].content)
+            # print(self.system_message)
+            print("QUESTION", messages[-1].content)
             print("CONTENT PLANNER", content)
             print("*****")
             if Commands.has_end(content):
@@ -346,10 +359,13 @@ class PlannerAgent(LLMPlannerAgent):
                     attempt_i += 1
                     try:
                         parsed_plan_message = parse_plan(
-                            content, self.name, self._available_agents
+                            content,
+                            self.name,
+                            self._available_agents,
                         )
                         break
                     except Exception as e:
+                        print(e)
                         # Do one LLM reask
                         messages_copy = [m.model_copy() for m in messages_copy]
                         messages_copy.append(

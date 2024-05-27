@@ -7,6 +7,7 @@ from meadow.agent.controller import ControllerAgent
 from meadow.agent.data_agents.attribute_detector import AttributeDetectorAgent
 from meadow.agent.data_agents.schema_renamer import SchemaRenamerAgent
 from meadow.agent.data_agents.sql_decomposer import SQLDecomposerAgent
+from meadow.agent.data_agents.sql_planner import SQLPlannerAgent
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
 from meadow.agent.executor.contrib.empty_result_debugger import EmptyResultExecutor
 from meadow.agent.executor.contrib.sql_validate_reask import SQLValidateExecutor
@@ -75,6 +76,7 @@ def get_text2sql_agent(
     add_reask: bool,
     add_empty_table: bool,
     add_decomposer: bool,
+    add_sql_planner: bool,
     add_attribute_selector: bool,
     add_schema_cleaner: bool,
 ) -> Agent:
@@ -128,6 +130,19 @@ def get_text2sql_agent(
             llm_callback=callback_decomp,
         )
         agents.insert(0, text2sql_decomposer)
+    
+    if add_sql_planner:
+        callback_planner: Callable = lambda model_messages, chat_response: model_callback(
+            model_messages, chat_response, example_idx, "PlannerAgent", all_prompts_to_save
+        )
+        sql_planner = SQLPlannerAgent(
+            client=planner_client,
+            llm_config=llm_config,
+            database=database,
+            overwrite_cache=overwrite_cache,
+            llm_callback=callback_planner,
+        )
+        agents.insert(0, sql_planner)
 
     if add_attribute_selector:
         callback_attr: Callable = lambda model_messages, chat_response: model_callback(

@@ -26,12 +26,20 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
+# DEFAULT_SQL_PROMPT = """You generate SQLite SQL queries and are a SQLite expert. Given the table schema and user's question, generate a SQLite SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
+
+# 1. Feel free to think through what you need to do first.
+# 2. Use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
+# 3. Then <description></description> tags for a one sentence description of what the SQL query captures. Be concise.
+# 4. Please use `FROM sqlXXX` to refer to the SQL query number XXX in the prompt. For example, if sql2 is in the schema from a prior step, please use `FROM sql2` to refer to that query.
+
+# The user's schema is:
+# {schema}"""
+
 DEFAULT_SQL_PROMPT = """You generate SQLite SQL queries and are a SQLite expert. Given the table schema and user's question, generate a SQLite SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
 
-1. Feel free to think through what you need to do first.
-2. Use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
-3. Then <description></description> tags for a one sentence description of what the SQL query captures. Be concise.
-4. Please use `FROM sqlXXX` to refer to the SQL query number XXX in the prompt. For example, if sql2 is in the schema from a prior step, please use `FROM sql2` to refer to that query.
+1. First use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
+2. Then <description></description> tags for a one sentence description of what the SQL query captures. Be concise.
 
 The user's schema is:
 {schema}"""
@@ -88,8 +96,9 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
     def description(self) -> str:
         """Get the description of the agent."""
         # return "Generates a single SQL query based on the given user instruction. Each instruction should be a detailed description of what attributes, aggregates, filter conditions, tables, and joins are needed in the SQL query along with any custom functions that are needed (e.g. ROW_NUMBER, RANK, LAG, ...)."
-        return "Generates a single SQL query based on the given user instruction. For queries requiring joins and at most one CTE, this agent is the optimal one to use. If the query requires more than one CTE, consider using the MultiCTESQLGenerator agent."
+        # return "Generates a single SQL query based on the given user instruction. For queries requiring joins and at most one CTE, this agent is the optimal one to use. If the query requires more than one CTE, consider using the MultiCTESQLGenerator agent."
         # return "This agent is an intermediate SQL generator that outputs SQL queries to answer user questions. This agent can handle SQL queries that involve multiple tables and joins but it is at an intermediate level.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a SQL query that answers the question or instruction."
+        return "Generates a single SQL query based on the given user instruction. Each instruction should clearly describe what question is to be asked and what attributes the user wants."
 
     @property
     def llm_client(self) -> Client:
@@ -190,7 +199,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         if content.endswith("<end>") and "<sql" in content:
             content = content.replace("<end>", "")
         if messages_start_idx < 1:
-            print(self.system_message)
+            # print(self.system_message)
             for msg in messages:
                 print(msg.role)
                 print(msg.content)

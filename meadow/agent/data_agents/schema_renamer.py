@@ -21,23 +21,23 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RENAME_PROMPT = """Your goal is to clean up a schema to make detecting joins and understanding the data easier for asking queries. You can rename the tables and columns as you see fit.
 
-The user will give you a schema and you need to output a column name remapping for any column that needs a more description or useful name. Join columns should ideally be the same name, for example. You can also keep the schema the same if you want.
+The user will give you a schema and you need to output a column name remapping for any column that needs a more descriptive or useful name. Join columns should be the same name and columns that do not join should be named differently. You can also keep the schema the same if you want.
 
 Output the remapping in JSON in the following format:
 
 {
   "table_name": {
-    "old_column1_name": "new_column1_name",
-    "old_column2_name": "new_column2_name",
+    "old_column1_name": "old_or_new_column1_name",
+    "old_column2_name": "old_or_new_column2_name",
     ...
   },
   "table_name": {
-    "old_column2_name": "new_column1_name",
+    "old_column1_name": "old_or_new_column1_name",
     ...
   },
 }
 
-Make sure all new column names are unique."""
+Make sure all new column names are unique. Try to keep changes to a minimum and keep columns as short as possible."""
 
 
 def parse_rename_and_update_db(
@@ -227,11 +227,11 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        # print("CLEANER")
-        # print(messages[-1].content)
-        # print("RESOPNSE")
-        # print(content)
-        # print("-----")
+        print("CLEANER")
+        print(messages[-1].content)
+        print("RESOPNSE")
+        print(content)
+        print("-----")
         return AgentMessage(
             role="assistant",
             content=content,

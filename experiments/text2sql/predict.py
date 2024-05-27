@@ -43,6 +43,7 @@ class TextToSQLParams(BaseModel):
     add_reask: bool = False
     add_empty_table: bool = False
     add_decomposer: bool = False
+    add_sql_planner: bool = False
     add_attribute_selector: bool = False
     add_schema_cleaner: bool = False
 
@@ -91,6 +92,7 @@ async def agenerate_sql(
             add_reask=text_to_sql.add_reask,
             add_empty_table=text_to_sql.add_empty_table,
             add_decomposer=text_to_sql.add_decomposer,
+            add_sql_planner=text_to_sql.add_sql_planner,
             add_attribute_selector=text_to_sql.add_attribute_selector,
             add_schema_cleaner=text_to_sql.add_schema_cleaner,
         )
@@ -113,7 +115,7 @@ def generate_sql(
     """Ask agent to generate SQL."""
     # Batch inputs for asyncio
     # REMOVE ME
-    # text_to_sql_in = text_to_sql_in[0:2]
+    # text_to_sql_in = text_to_sql_in[27:]
     # text_to_sql_in = [t for t in text_to_sql_in if "flight_2" in t.db_id]
     text_to_sql_in_batches = [
         text_to_sql_in[i : i + async_batch_size]
@@ -186,6 +188,7 @@ def get_text_to_sql_in(
     add_reask: bool,
     add_empty_table: bool,
     add_decomposer: bool,
+    add_sql_planner: bool,
     add_attribute_selector: bool,
     add_schema_cleaner: bool,
 ) -> TextToSQLParams:
@@ -205,6 +208,7 @@ def get_text_to_sql_in(
         add_reask=add_reask,
         add_empty_table=add_empty_table,
         add_decomposer=add_decomposer,
+        add_sql_planner=add_sql_planner,
         add_attribute_selector=add_attribute_selector,
         add_schema_cleaner=add_schema_cleaner,
     )
@@ -234,6 +238,7 @@ def cli() -> None:
 @click.option("--add-reask", is_flag=True, default=False)
 @click.option("--add-empty-table", is_flag=True, default=False)
 @click.option("--add-decomposer", is_flag=True, default=False)
+@click.option("--add-sql-planner", is_flag=True, default=False)
 @click.option("--add-attribute-selector", is_flag=True, default=False)
 @click.option("--add-schema-cleaner", is_flag=True, default=False)
 # Model options
@@ -266,6 +271,7 @@ def predict(
     add_reask: bool,
     add_empty_table: bool,
     add_decomposer: bool,
+    add_sql_planner: bool,
     add_attribute_selector: bool,
     add_schema_cleaner: bool,
     max_tokens: int,
@@ -338,6 +344,7 @@ def predict(
             add_reask=add_reask,
             add_empty_table=add_empty_table,
             add_decomposer=add_decomposer,
+            add_sql_planner=add_sql_planner,
             add_attribute_selector=add_attribute_selector,
             add_schema_cleaner=add_schema_cleaner,
         )
@@ -355,6 +362,7 @@ def predict(
         ("reask_" if add_reask else "") + 
         ("empty_" if add_empty_table else "") + 
         ("decomposer_" if add_decomposer else "") + 
+        ("sqlplanner_" if add_sql_planner else "") +
         ("attribute_" if add_attribute_selector else "") + 
         ("cleaner_" if add_schema_cleaner else "")
     )
