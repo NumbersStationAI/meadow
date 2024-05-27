@@ -10,6 +10,7 @@ from typing import Any
 
 import click
 import pandas as pd
+import sqlglot
 from tqdm.auto import tqdm
 
 from meadow.cache.duckdb import DuckDBCache
@@ -285,6 +286,9 @@ def cli() -> None:
 @click.option(
     "--correct-sql-casing", type=bool, is_flag=True, default=False, required=False
 )
+@click.option(
+    "--correct-flight-issue", type=bool, is_flag=True, default=False, required=False
+)
 @click.option("--api-key", type=str, required=True)
 @click.option("--model", type=str, default="gpt-4o")
 @click.option(
@@ -301,6 +305,7 @@ def evaluate(
     output_dir: str,
     output_filename: str,
     correct_sql_casing: bool,
+    correct_flight_issue: bool,
     api_key: str,
     model: str,
     client_cache_path: str,
@@ -341,6 +346,26 @@ def evaluate(
     assert len(gold_sqls_dict) == len(
         pred_sqls_dict
     ), "Sample size doesn't match between pred and gold file"
+
+    if correct_flight_issue:
+        def _remap_where_sql(
+            node: sqlglot.Expression
+        ) -> sqlglot.Expression:
+            """Remap tables."""
+            if isinstance(node, sqlglot.exp.Where):
+                new_lhs = sqlglot.parse_one(f"TRIM({node.this.this.sql()})")
+                node.this.args["this"] = new_lhs
+            return node
+
+        for gold_sql in gold_sqls_dict:
+            if gold_sql["db_id"] == "flight_2":
+                try:
+                    parsed = sqlglot.parse_one(gold_sql["query"], dialect="sqlite")
+                    parsed = parsed.transform(_remap_where_sql)
+                    gold_sql["query"] = parsed.sql(dialect="sqlite")
+                except Exception:
+                    pass
+        print("REMMAPED")
 
     # Keep track of everything
     full_results = []

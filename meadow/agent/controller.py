@@ -179,7 +179,12 @@ class ControllerAgent(Agent):
 
                 next_message = executor_response.content
                 next_display = executor_response.display_content
-                # We have finished the chat with the task agent so go back to supervisor
+                # We just pretended we started and completed a chat with the task agent.
+                # The conversation is now over, so we need to set the current agent to
+                # the supervisor and add the final message to this controller's message history.
+                self._messages.add_message(
+                    agent=self._current_agent, role="user", message=executor_response
+                )
                 self.set_current_agent(self._supervisor)
             else:
                 next_display = None
@@ -304,13 +309,13 @@ class ControllerAgent(Agent):
         )
         await self.receive(message, self._supervisor)
         all_messages = self._messages.get_messages_linearly_by_time()
-        print("CHAT RESPONSE", self.name, "SUP", self._supervisor.name)
         for message in reversed(all_messages):
             if not Commands.has_end(message.content) and not Commands.has_next(
                 message.content
             ):
-                print(
-                    "RETURNING", message.content, "-----\n\n", message.display_content
-                )
+                # print("CHAT RESPONSE", self.name, "SUP", self._supervisor.name)
+                # print(
+                #     "RETURNING", message.content, "-----\n\n", message.display_content
+                # )
                 return message
         return None

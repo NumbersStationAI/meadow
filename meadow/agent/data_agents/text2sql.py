@@ -89,6 +89,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         """Get the description of the agent."""
         # return "Generates a single SQL query based on the given user instruction. Each instruction should be a detailed description of what attributes, aggregates, filter conditions, tables, and joins are needed in the SQL query along with any custom functions that are needed (e.g. ROW_NUMBER, RANK, LAG, ...)."
         return "Generates a single SQL query based on the given user instruction. For queries requiring joins and at most one CTE, this agent is the optimal one to use. If the query requires more than one CTE, consider using the MultiCTESQLGenerator agent."
+        # return "This agent is an intermediate SQL generator that outputs SQL queries to answer user questions. This agent can handle SQL queries that involve multiple tables and joins but it is at an intermediate level.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a SQL query that answers the question or instruction."
 
     @property
     def llm_client(self) -> Client:
@@ -166,7 +167,6 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         ):
             messages_start_idx -= 2
         messages = messages[messages_start_idx:]
-        # print(messages_start_idx, "STARTING")
         messages[0].content = messages[0].content
         chat_response = await generate_llm_reply(
             client=self.llm_client,
@@ -189,14 +189,14 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
                 content = content.replace("```sql", "<sql>").replace("```", "</sql>")
         if content.endswith("<end>") and "<sql" in content:
             content = content.replace("<end>", "")
-        # if messages_start_idx < 1:
-        #     print(self.system_message)
-        #     for msg in messages:
-        #         print(msg.role)
-        #         print(msg.content)
-        #         print("---------")
-        #     print("SQL AGENT CONTENT", content)
-        #     print("*****")
+        if messages_start_idx < 1:
+            print(self.system_message)
+            for msg in messages:
+                print(msg.role)
+                print(msg.content)
+                print("---------")
+            print("SQL AGENT CONTENT", content)
+            print("*****")
         return AgentMessage(
             role="assistant",
             content=content,

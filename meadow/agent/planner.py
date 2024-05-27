@@ -26,6 +26,32 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PLANNER_PROMPT = """Below is the data schema the user is working with.
+{serialized_schema}
+
+Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
+
+For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. If you want to refer to a previous step, use 'stepXX'. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
+
+<steps>
+<step1>
+<agent>...</agent>
+<instruction>...</instruction>
+</step1>
+<step2>
+...
+</step2>
+...
+</steps>
+
+You have access to the following agents.
+
+<agents>
+{agents}
+</agents>
+
+Out a single plan."""
+
 DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
 
 For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
@@ -131,6 +157,32 @@ def parse_plan(
         if agent == "AttributeDetector" and "{" in instruction:
             raise ValueError(
                 f"AttributeDetector agent cannot have any replacement tags in the instruction. instruction={instruction}"
+            )
+        # if agent in {"SQLGenerator", "NestedSQLGenerator"} and "{" in instruction:
+        #     copied_plan = [p.model_copy() for p in plan] + [
+        #         SubTaskForParse(agent_name=agent, prompt=instruction)
+        #     ]
+        #     fake_plan = swap_instruction_replacements_with_agent_names(copied_plan)
+        #     if "SQLGenerator" or "NestedSQLGenerator" in [
+        #         p.agent_name for p in fake_plan
+        #     ]:
+        #         raise ValueError(
+        #             "SQLGenerator cannot take as input the output of another SQLGenerator or NestedSQLGenerator agent. If you wish to refer to their previous steps, please just say 'stepXX'"
+        #         )
+
+        if agent == "NestedSQLGenerator" and "NestedSQLGenerator" in [
+            p.agent_name for p in plan
+        ]:
+            raise ValueError(
+                "Only one NestedSQLGenerator agent can be used in a plan without any SQLGenerator agents. "
+                "This agent decomposes the question for you."
+            )
+        if agent == "SQLGenerator" and "NestedSQLGenerator" in [
+            p.agent_name for p in plan
+        ]:
+            raise ValueError(
+                "SQLGenerator agent cannot be used in a plan with a NestedSQLGenerator agent. "
+                "Just use one NestedSQLGenerator agent to decompose the question."
             )
         plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
     return AgentMessage(
@@ -273,8 +325,8 @@ class PlannerAgent(LLMPlannerAgent):
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
-            # print(self.system_message)
-            # print(messages[-1].content)
+            print(self.system_message)
+            print(messages[-1].content)
             print("CONTENT PLANNER", content)
             print("*****")
             if Commands.has_end(content):
@@ -287,32 +339,66 @@ class PlannerAgent(LLMPlannerAgent):
                 )
             else:
                 display_content = None
-                try:
-                    # TODO: refactor using executors
-                    parsed_plan_message = parse_plan(
-                        content, self.name, self._available_agents
-                    )
-                    display_content = parsed_plan_message.display_content
-                    parsed_plan = [
-                        SubTaskForParse(**m)
-                        for m in json.loads(parsed_plan_message.content)
-                    ]
-                    # Handle agent name swaps
-                    parsed_plan = swap_instruction_replacements_with_agent_names(
-                        parsed_plan
-                    )
-                    for sub_task in parsed_plan:
-                        self._plan.put(
-                            SubTask(
-                                agent=self._available_agents[sub_task.agent_name],
-                                prompt=sub_task.prompt,
+                # TODO: refactor using executors
+                messages_copy = messages
+                attempt_i = 0
+                while attempt_i <= 2:
+                    attempt_i += 1
+                    try:
+                        parsed_plan_message = parse_plan(
+                            content, self.name, self._available_agents
+                        )
+                        break
+                    except Exception as e:
+                        # Do one LLM reask
+                        messages_copy = [m.model_copy() for m in messages_copy]
+                        messages_copy.append(
+                            AgentMessage(
+                                role="assistant",
+                                content=content,
+                                sending_agent=self.name,
                             )
                         )
-                except Exception as e:
-                    logger.warning(
-                        f"Error in parsing plan. Ignoring as executor should throw error back to fix. e={e}, message={content}."
+                        messages_copy.append(
+                            AgentMessage(
+                                role="user",
+                                content=(str(e) + " Please retry."),
+                                sending_agent="User",
+                            )
+                        )
+                        chat_response = await generate_llm_reply(
+                            client=self.llm_client,
+                            messages=messages_copy,
+                            tools=[],
+                            system_message=AgentMessage(
+                                role="system",
+                                content=self.system_message,
+                                sending_agent=self.name,
+                            ),
+                            llm_config=self._llm_config,
+                            llm_callback=self._llm_callback,
+                            overwrite_cache=self._overwrite_cache,
+                        )
+                        content = chat_response.choices[0].message.content
+                        print("CONTENT PLANNER REDO", content)
+                        print("*****")
+
+                display_content = parsed_plan_message.display_content
+                parsed_plan = [
+                    SubTaskForParse(**m)
+                    for m in json.loads(parsed_plan_message.content)
+                ]
+                # Handle agent name swaps
+                parsed_plan = swap_instruction_replacements_with_agent_names(
+                    parsed_plan
+                )
+                for sub_task in parsed_plan:
+                    self._plan.put(
+                        SubTask(
+                            agent=self._available_agents[sub_task.agent_name],
+                            prompt=sub_task.prompt,
+                        )
                     )
-                    raise e
                 return AgentMessage(
                     role="assistant",
                     content=content,

@@ -4,6 +4,7 @@ import asyncio
 import copy
 import datetime
 import json
+import logging
 import random
 import re
 from pathlib import Path
@@ -160,7 +161,7 @@ def generate_sql(
             tbl = ""
         else:
             sql = (
-                last_sql_message.display_content.split("\n\n")[0]
+                last_sql_message.display_content.split("Table:")[0]
                 .strip()[len("SQL:") :]
                 .strip()
             )
@@ -281,6 +282,7 @@ def predict(
     """Predict SQL."""
     random.seed(0)
     np.random.seed(0)
+
     locals_dict = locals()
     console.print(json.dumps(locals_dict, indent=2))
 

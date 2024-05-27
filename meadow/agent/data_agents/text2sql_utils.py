@@ -9,6 +9,20 @@ from meadow.database.database import Database
 logger = logging.getLogger(__name__)
 
 
+def parse_query_run_error(error_message: str) -> str:
+    """Parse the error message from the query run.
+
+    We need to remove the fully compiled SQL query from the result and just get the
+    error message. The format for errors from running a query is SQL:Error:Error Attr.
+    """
+    if ":" in error_message:
+        error_message_split = error_message.split(":", 1)[1]
+        if "SELECT" in error_message_split:
+            return error_message.strip()
+        return error_message_split.strip()
+    return error_message.strip()
+
+
 def prettify_sql(sql: str, dialect: str = "sqlite") -> str:
     """Prettify the SQL query."""
     try:
@@ -68,7 +82,7 @@ def parse_sql_response(
         sqls = parse_sqls(content)
         if len(sqls) != 1:
             logger.warning(
-                f"Multiple SQL queries found in response. sql={sqls}. Taking last one."
+                f"Multiple SQL queries found in response. Taking last one. sqls={sqls}"
             )
         sql_to_add = sqls[-1]
         description = parse_description(content)
@@ -85,8 +99,11 @@ def parse_sql_response(
             database.add_view(name=next_sql_id, sql=sql_to_add, description=description)
             added_views.add(next_sql_id)
         except Exception as e:
-            error_message = f"Failed to add view to database. e={e}"
-            logger.warning(error_message)
+            error_message = parse_query_run_error(str(e))
+            error_message = f"Failed to add view to database. Often this means the query failed. e={error_message}"
+            logger.warning(
+                error_message,
+            )
 
     if not error_message:
         try:
@@ -97,16 +114,11 @@ def parse_sql_response(
 
     if not error_message:
         try:
-            database.run_sql_to_df(final_view_sql).head(5)
+            database.run_sql_to_df(final_view_sql)
         except Exception as e:
-            if ":" in str(e):
-                err_msg = str(e).split(":", 1)[1]
-                if "SELECT" in err_msg:
-                    print("Parsing failed")
-            else:
-                err_msg = str(e)
-            error_message = f"Failed to run SQL in SQLite. e={err_msg.strip()}"
-            logger.warning(error_message)
+            error_message = parse_query_run_error(str(e))
+            error_message = f"Failed to run SQL in SQLite. e={error_message}"
+            logger.warning(f"{error_message}, sql={final_view_sql}")
 
     # If error message, we must either respond for a LLM to fix (if can_reask_again)
     # or we must gracefully fail so the next steps can move.
@@ -156,7 +168,7 @@ def parse_sql_response(
 
 
 # TODO mark as executor function
-def parse_and_run_single_sql(
+def parse_and_run_sql_for_debugger(
     messages: list[AgentMessage],
     agent_name: str,
     database: Database,
@@ -167,16 +179,11 @@ def parse_and_run_single_sql(
     sql = prettify_sql(content.strip())
     error_message = None
     try:
-        df = database.run_sql_to_df(sql).head(5)
+        df = database.run_sql_to_df(sql)
     except Exception as e:
-        # Extract error message alone to avoid views
-        if ":" in str(e):
-            err_msg = str(e).split(":", 1)[1]
-        else:
-            err_msg = str(e)
-        if "SELECT" in err_msg:
-            print("Parsing failed")
-        error_message = f"Failed to run SQL in SQLite. e={err_msg.strip()}"
+        error_message = parse_query_run_error(str(e))
+        error_message = f"Failed to run SQL in SQLite. e={error_message}"
+        logger.warning(f"{error_message}, sql={sql}")
     if error_message:
         if can_reask_again:
             return AgentMessage(
@@ -196,9 +203,13 @@ def parse_and_run_single_sql(
                 sending_agent=agent_name,
                 requires_response=False,
             )
+    # Quote all string values in df
+    for col in df.columns:
+        if df[col].dtype == "object":
+            df[col] = df[col].apply(lambda x: f"'{x}'")
     return AgentMessage(
         role="assistant",
-        content=f"SQL:\n{sql}\n\nTable:\n{df.to_string()}",
+        content=f"SQL:\n{sql}\n\nTable:\n{df.head(100).to_csv(index=False, sep='|')}",
         sending_agent=agent_name,
     )
 
@@ -226,7 +237,7 @@ def check_empty_table(
         description = parse_description(content)
         if len(sqls) != 1:
             logger.warning(
-                f"Multiple SQL queries found in response. sql={sqls}. Taking last one."
+                f"Multiple SQL queries found in response. Taking last one. sqls={sqls}"
             )
         pretty_sql_from_sqls = prettify_sql(sqls[-1])
         # The view should have been added from parse_sql_response
@@ -255,12 +266,11 @@ def check_empty_table(
             except Exception as e:
                 logger.warning(e)
                 pass
-        sql_df = database.run_sql_to_df(pretty_sql).head(100)
+        sql_df = database.run_sql_to_df(pretty_sql)
     except Exception as e:
-        error_message = (
-            f"Question: {final_description}\nFailed to parse SQL in response. e={e}"
-        )
-        logger.warning(error_message)
+        error_message = parse_query_run_error(str(e))
+        error_message = f"Question: {final_description}\nFailed to parse SQL in response. e={error_message}"
+        logger.warning(f"{error_message}, sql={pretty_sql}")
 
     if not error_message:
         # Check if a count(*) query with a 0

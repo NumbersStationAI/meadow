@@ -1,6 +1,7 @@
 """Serialize the database utils."""
 
 import pandas as pd
+
 from meadow.database.connector.connector import Table
 
 

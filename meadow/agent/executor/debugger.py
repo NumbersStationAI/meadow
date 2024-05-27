@@ -1,16 +1,14 @@
 """Executor agent."""
 
 import logging
-import re
 from typing import Callable
 
 from termcolor import colored
 
 from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
 from meadow.agent.data_agents.text2sql_utils import (
-    parse_and_run_single_sql,
+    parse_and_run_sql_for_debugger,
     parse_sql_response,
-    parse_sqls,
 )
 from meadow.agent.executor.reask import ReaskExecutor
 from meadow.agent.schema import AgentMessage
@@ -21,7 +19,7 @@ from meadow.agent.utils import (
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.database import Database
-from meadow.database.serializer import serialize_as_list, serialize_as_xml
+from meadow.database.serializer import serialize_as_list
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
@@ -70,7 +68,7 @@ def parse_plan(
         inner_steps = message
     if "Action:" not in inner_steps:
         raise ValueError(
-            f"Action is not in the message. Please use\nAction: Query, Edit, or Do Nothing\nInput: ```Input to action in quotes```."
+            "Action is not in the message. Please use\nAction: Query, Edit, or Do Nothing\nInput: ```Input to action in quotes```."
         )
     if "Input:" not in inner_steps:
         action = inner_steps.split("Action:", 1)[1].strip()
@@ -121,7 +119,7 @@ def parse_plan_and_take_action(
         message = AgentMessage(
             role="assistant", content=f"{input}", sending_agent=agent_name
         )
-        response = parse_and_run_single_sql(
+        response = parse_and_run_sql_for_debugger(
             [message], agent_name, database, can_reask_again
         )
         # We know that a "Query" message requires a response from this agent
@@ -335,7 +333,7 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        # print(self.system_message)
+        print(self.system_message)
         for msg in messages:
             print(msg.role)
             print(msg.content)

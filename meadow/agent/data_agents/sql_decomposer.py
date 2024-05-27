@@ -27,7 +27,8 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQL_DECOMP_PROMPT = """The user wants to answer an analytics question in SQL.
+
+DEFAULT_SQL_DECOMP_INST_PROMPT = """The user wants to answer an analytics question in SQL.
 
 Based on the following question provided by the user, please make a plan consisting of a minimal sequence of SQL-queries using SQL Generator agent. The SQL Generator generates a single SQL query based on the given user instructions.
 
@@ -43,6 +44,19 @@ Below is the data schema the user is working with.
 Please keep the plan simple and use as few steps as possible. The last instruction should specifically say what the final attributes are. The last instruction tag should end with a sentence starting with "The final attributes should be"... and then provide the attributes."""
 
 
+DEFAULT_SQL_DECOMP_NUM_PROMPT = """Below is the data schema the user is working with.
+
+{serialized_schema}
+
+Given a user question, how should the user break down the query into substeps that can send to a simple SQLGenerator agent that takes questions about this schema and outputs sql queries.
+
+Please reuse previous steps via the phrase 'from `sqlXX`'. E.g., if step 1 has a subquery you want in step 2, use the phrase 'from `sql1`' in step 2.
+
+Output the steps in enumerated format 1., 2., 3., etc.
+
+The last step must end with the phrase `The final attributes should be` followed by the final attributes that the user wants to get from the database."""
+
+
 class SubTaskForParse(BaseModel):
     """Sub-task in a plan used in executor."""
 
@@ -50,7 +64,7 @@ class SubTaskForParse(BaseModel):
     prompt: str
 
 
-def parse_steps(input_str: str) -> list[tuple[str, str]]:
+def parse_steps_instructions(input_str: str) -> list[tuple[str, str]]:
     """
     Parse the given XML-like string and extract instruction using regular expressions.
     """
@@ -63,13 +77,53 @@ def parse_steps(input_str: str) -> list[tuple[str, str]]:
     return [instruction.strip() for instruction in matches]
 
 
+def parse_steps_numbers(input_str: str) -> list[str]:
+    """
+    Parse the given output structure using regular expressions.
+    """
+    if "1. " not in input_str:
+        raise ValueError(
+            "The instructions does not contain any steps. Please output steps in 1., 2., 3., etc. format."
+        )
+    text = "\n1. " + input_str.split("1. ", 1)[1]
+    pieces = re.split(
+        r"(\n\d+\.\s+)",
+        text,
+        flags=re.MULTILINE,
+    )
+    pieces = [p.strip() for p in pieces if p.strip()]
+    # pieces will be [#, instruction, #, instruction, ...]
+    instructions = {}
+    cur_num = None
+    for piece in pieces:
+        piece = piece.strip()
+        try:
+            cur_num = int(re.match(r"(\d+)\.", piece.strip()).group(1))
+            continue
+        except Exception:
+            pass
+        # Remove the ```sql``` blocks
+        # piece_without_sql = re.sub(r"```sql(.*?)```", "", piece, flags=re.DOTALL)
+        # piece_without_sql = re.sub(r"\s+", " ", piece_without_sql)
+        # if piece_without_sql:
+        #     number = int(re.match(r"(\d+)\.", piece_without_sql.strip()).group(1))
+        #     instructions[number] = piece_without_sql.strip()
+        # else:
+        assert cur_num is not None
+        instructions[cur_num] = piece.strip().replace("**", "")
+    return [instructions[i] for i in sorted(instructions.keys())]
+
+
 def parse_plan(
     message: str,
     agent_name: str,
     agent_to_use: str = "SQLGenerator",
 ) -> AgentMessage:
     """Extract the plan from the response."""
-    parsed_steps = parse_steps(message)
+    if "<instruction" in message:
+        parsed_steps = parse_steps_instructions(message)
+    else:
+        parsed_steps = parse_steps_numbers(message)
     plan: list[SubTaskForParse] = []
     for instruction in parsed_steps:
         plan.append(SubTaskForParse(agent_name=agent_to_use, prompt=instruction))
@@ -92,7 +146,7 @@ class SQLDecomposerAgent(LLMPlannerAgent):
         llm_config: LLMConfig | None,
         database: Database | None,
         available_agents: list[Agent] = None,
-        system_prompt: str = DEFAULT_SQL_DECOMP_PROMPT,
+        system_prompt: str = DEFAULT_SQL_DECOMP_INST_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -127,6 +181,7 @@ class SQLDecomposerAgent(LLMPlannerAgent):
     def description(self) -> str:
         """Get the description of the agent."""
         return "For heavily complex SQL queries that require multiple CTE expression, this agent decomposes the task into simpler sub queries that get joined together. This agent should be used instead of the simple SQLGenerator if the question is heavily complex."
+        # return "This agent takes as input a very complex user questions that often require numerous nested reasoning steps and outputs a SQL query to answer it. This agent should only be used if other SQL agents are not good enough and can't handle the complexity for the question.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a of SQL queries that answers the original user question."
 
     @property
     def llm_client(self) -> Client:
@@ -212,8 +267,8 @@ class SQLDecomposerAgent(LLMPlannerAgent):
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
-            # print(self.system_message)
-            # print(messages[-1].content)
+            print(self.system_message)
+            print(messages[-1].content)
             print("SQL DECOMP PLANNER", content)
             print("*****")
             if Commands.has_end(content):
@@ -234,6 +289,10 @@ class SQLDecomposerAgent(LLMPlannerAgent):
                         SubTaskForParse(**m)
                         for m in json.loads(parsed_plan_message.content)
                     ]
+                    for p in parsed_plan:
+                        print(p.prompt)
+                        print("******")
+                        print("******")
                     # If the plan is just a single step, replace with the direct question from the user with the attributes
                     if len(parsed_plan) == 1:
                         parsed_plan[0].prompt = messages[-1].content

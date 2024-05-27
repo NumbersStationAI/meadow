@@ -223,9 +223,7 @@ class Database:
         """Add a view to the database."""
         valid, error = validate_sql(sql, self._connector.dialect)
         if not valid:
-            raise ValueError(
-                f"Invalid SQL sql={sql}, dialect={self._connector.dialect}, error={error}"
-            )
+            raise ValueError(error)
         # Try to mine for columns from the sql
         estimated_columns = None
         df = None
