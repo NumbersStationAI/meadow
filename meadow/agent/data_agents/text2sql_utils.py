@@ -77,8 +77,6 @@ def parse_sql_response(
     error_message: str = None
     final_view_sql: str = None
     added_views = set()
-    if "SUM(oi.quantity * oi.unit_price) AS total_lifetime_spend" in content:
-        print("HERE")
     try:
         next_sql_id = f"sql{database.get_number_of_views() + 1}"
         sqls = parse_sqls(content)
@@ -207,8 +205,13 @@ def parse_and_run_sql_for_debugger(
             )
     # Quote all string values in df
     for col in df.columns:
-        if df[col].dtype == "object":
-            df[col] = df[col].apply(lambda x: f"'{x}'")
+        # Means there are duplicate column names
+        if len(df[col].shape) == 2 and df[col].shape[1] > 1:
+            if df[col].iloc[:, 0].dtype == "object":
+                df[col].iloc[:, 0] = df[col].iloc[:, 0].apply(lambda x: f"'{x}'")
+        else:
+            if df[col].dtype == "object":
+                df[col] = df[col].apply(lambda x: f"'{x}'")
     return AgentMessage(
         role="assistant",
         content=f"SQL:\n{sql}\n\nTable:\n{df.head(100).to_csv(index=False, sep='|')}",

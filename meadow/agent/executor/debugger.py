@@ -46,22 +46,6 @@ def parse_plan(
     message: str,
 ) -> tuple[str, str]:
     """Extract the plan from the response."""
-    # if "<step>" not in message:
-    #     raise ValueError(
-    #         f"message={message}. Please output a plan in a <step> tag with <action> and <input> tags. Action must be Query, Edit, or Do Nothing."
-    #     )
-    # inner_steps = re.search(r"(<step>.*</step>)", message, re.DOTALL).group(1)
-    # pattern = re.compile(
-    #     r"<step>\s*<action>(.*?)</action>\s*(<input>(.*?)</input>){0,1}\s*</step>",
-    #     re.DOTALL,
-    # )
-    # matches = pattern.findall(inner_steps)
-    # if not matches:
-    #     raise ValueError(
-    #         "Failed to parse the message. Outputs needs to be in <step> tags."
-    #     )
-    # action, _, input = matches[0]
-    print(message)
     if "---" in message:
         inner_steps = message.split("---")[1]
     else:
@@ -78,7 +62,6 @@ def parse_plan(
         action, input = inner_steps.split("Action:", 1)[1].split("Input:", 1)
     action = action.strip()
     input = input.strip().strip("```sql").strip("```")
-    print("ACTION", action, "INPUT", input)
     if action not in ["Query", "Edit", "Do Nothing"]:
         raise ValueError(
             f"Unknown action {action}. Please use Query or Edit or Do Nothing."

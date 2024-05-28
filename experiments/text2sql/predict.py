@@ -37,6 +37,7 @@ console = Console(soft_wrap=True)
 class TextToSQLParams(BaseModel):
     """Text to SQL parameters."""
 
+    benchmark: str
     instruction: str
     db_id: str
     database_path: str
@@ -81,6 +82,7 @@ async def agenerate_sql(
 
         # load agent
         agent = get_text2sql_agent(
+            benchmark=text_to_sql.benchmark,
             user_agent=user_agent,
             client=client,
             planner_client=planner_client,
@@ -114,9 +116,6 @@ def generate_sql(
 ) -> tuple[list[tuple[str, str]], list[list[PromptLog]]]:
     """Ask agent to generate SQL."""
     # Batch inputs for asyncio
-    # REMOVE ME
-    # text_to_sql_in = text_to_sql_in[27:]
-    # text_to_sql_in = [t for t in text_to_sql_in if "flight_2" in t.db_id]
     text_to_sql_in_batches = [
         text_to_sql_in[i : i + async_batch_size]
         for i in range(0, len(text_to_sql_in), async_batch_size)
@@ -182,6 +181,7 @@ def generate_sql(
 
 
 def get_text_to_sql_in(
+    benchmark: str,
     input_question: dict,
     db_to_tables: dict[str, dict[str, Table]],
     database_path: Path,
@@ -202,6 +202,7 @@ def get_text_to_sql_in(
         possible_db_path = database_path / db_id / f"{db_id}.duckdb"
 
     text_to_sql_in = TextToSQLParams(
+        benchmark=benchmark,
         instruction=question,
         db_id=db_id,
         database_path=str(possible_db_path),
@@ -292,6 +293,11 @@ def predict(
     locals_dict = locals()
     console.print(json.dumps(locals_dict, indent=2))
 
+    if "custom" in dataset_path:
+        benchmark = "custom"
+    else:
+        benchmark = "spider"
+
     # load client
     llm_config = LLMConfig(
         temperature=temperature,
@@ -331,6 +337,8 @@ def predict(
     if num_run > 0:
         console.print(f"Running on {min(len(data), num_run)} examples")
         data = data[:num_run]
+    
+    # data = [t for t in data if "flight" in t["db_id"]]
     original_data = data
 
     # load the examples
@@ -338,6 +346,7 @@ def predict(
     num_print = min(num_print, len(data))
     text_to_sql_in = [
         get_text_to_sql_in(
+            benchmark=benchmark,
             input_question=input_question,
             db_to_tables=db_to_tables,
             database_path=Path(database_path),

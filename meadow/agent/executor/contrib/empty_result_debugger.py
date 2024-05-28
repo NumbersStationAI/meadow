@@ -12,6 +12,7 @@ DEFAULT_EMPTYRESULT_PROMPT = """You job is to help debug why a given SQL query i
 * Incorrect use of logical operators (OR vs AND). The booleans may not match what the user is asking.
 * Incorrect handling of NULL values. The filter may be incorrectly adding or removing NULL values.
 * Incorrect joins where the join keys are not matching. Not all dependencies are added to the schema so the joins may need to be debugged.
+* Incorrect CTE expressions. A subtable may be empty, causing the downstream query to be empty.
 
 The user will provide their schema and associated empty SQL query. You have three possible actions you can take to resolve the issue
 
@@ -26,7 +27,7 @@ Action: Query/Edit/Do Nothing
 Input: ```Input to action in quotes```
 ---
 
-Your final goal is to edit the SQL to be correct or do nothing. Often, a good first step is to Query with 'SELECT <relevant_attributes> FROM <table> LIMIT 100' without a filter to see all the values and attributes in the table. However, you may need to be more creative if the table is very large."""
+Your final goal is to edit the SQL to be correct or do nothing. Often, a good first step is to Query with 'SELECT <relevant_attributes> FROM <table> LIMIT 100' without a filter to see all the values and attributes in the table. If the query has a lot of CTEs, you may need to start debugging them one at a time."""
 
 
 class EmptyResultExecutor(DebuggerExecutor):

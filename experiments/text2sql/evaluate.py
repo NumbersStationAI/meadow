@@ -168,19 +168,23 @@ def compute_execution_accuracy(
     """Compute execution accuracy in utils."""
     scores = []
     empty_res_scores = []
+    empty_res_gold_scores = []
     for gold_sql, pred_sql, gold_db in tqdm(
         zip(gold_sqls, pred_sqls, gold_dbs), total=len(gold_sqls), desc="Exec Acc Ours"
     ):
         connector = SQLiteConnector(db_path = str(Path(db_dir) / gold_db / f"{gold_db}.sqlite"))
         database = Database(connector=connector)
         try:
-            exec_score, empty_res_score = execution_accuracy(gold_sql, pred_sql, database, client)
+            exec_score, empty_res_score, empty_res_gold_score = execution_accuracy(gold_sql, pred_sql, database, client)
             scores.append(exec_score)
             empty_res_scores.append(empty_res_score)
+            empty_res_gold_scores.append(empty_res_gold_score)
         except Exception as e:
             scores.append(0)
             empty_res_scores.append(0)
+            empty_res_gold_scores.append(0)
             pass
+    print("PERCENT EMPTY GOLD", (len(empty_res_gold_scores) - sum(empty_res_gold_scores)) / len(empty_res_gold_scores))
     return sum(scores) / len(scores), sum(empty_res_scores) / len(empty_res_scores), scores, empty_res_scores
 
 
@@ -341,7 +345,8 @@ def evaluate(
     gold_sqls_dict = json.load(gold_path.open("r", encoding="utf-8"))
     pred_sqls_dict = [json.loads(ll) for ll in pred_path.open("r").readlines()]
 
-    gold_sqls_dict = gold_sqls_dict[: len(pred_sqls_dict)]
+    pred_db_id_question = set([(p["db_id"], p["question"]) for p in pred_sqls_dict])
+    gold_sqls_dict = [g for g in gold_sqls_dict if (g["db_id"], g["question"]) in pred_db_id_question]
     # Data validation
     assert len(gold_sqls_dict) == len(
         pred_sqls_dict
@@ -355,6 +360,11 @@ def evaluate(
             if isinstance(node, sqlglot.exp.Where):
                 new_lhs = sqlglot.parse_one(f"TRIM({node.this.this.sql()})")
                 node.this.args["this"] = new_lhs
+            elif isinstance(node, sqlglot.exp.Join):
+                new_lhs = sqlglot.parse_one(f"TRIM({node.args['on'].this.sql()})")
+                new_rhs = sqlglot.parse_one(f"TRIM({node.args['on'].expression.sql()})")
+                node.args["on"].args["this"] = new_lhs
+                node.args["on"].args["expression"] = new_rhs
             return node
 
         for gold_sql in gold_sqls_dict:
@@ -365,7 +375,6 @@ def evaluate(
                     gold_sql["query"] = parsed.sql(dialect="sqlite")
                 except Exception:
                     pass
-        print("REMMAPED")
 
     # Keep track of everything
     full_results = []

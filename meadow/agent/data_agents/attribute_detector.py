@@ -146,8 +146,6 @@ class AttributeDetectorAgent(LLMAgent):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        print(messages[-1].content)
-        print("ATTRIBUTE ANSWER", content)
         content = content.split("Attributes:", 1)[-1].strip()
         return AgentMessage(
             role="assistant",

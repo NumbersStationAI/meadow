@@ -190,7 +190,7 @@ def execution_accuracy(
     pred: str,
     database: Database,
     client: Client,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """Evaluate execution accuracy for one example."""
     final_score = 0
     assert gold, "Gold SQL is empty"
@@ -233,4 +233,9 @@ Predicted DataFrames:
         empty_res = 0
     else:
         empty_res = 1
-    return final_score, empty_res
+    # Check if gold empty or None value
+    if df_gold.empty or all(df_gold.isnull().all()):
+        empty_gold_res = 0
+    else:
+        empty_gold_res = 1
+    return final_score, empty_res, empty_gold_res

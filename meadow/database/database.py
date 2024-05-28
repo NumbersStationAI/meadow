@@ -39,7 +39,9 @@ def _get_base_remapping_sql(base_table: Table, new_table: Table) -> str:
     """Get the SQL for remapping base tables."""
     column_aliases = []
     for old_column, new_column in zip(base_table.columns, new_table.columns):
-        column_aliases.append(f"{old_column.name} AS {new_column.name}")
+        column_aliases.append(
+            f"{base_table.name}.'{old_column.name}' AS '{new_column.name}'"
+        )
     sql = f"SELECT {', '.join(column_aliases)} "
     sql += f"FROM {base_table.name}"
     return sql
@@ -141,6 +143,24 @@ def extract_columns_from_df(df: pd.DataFrame) -> list[Column]:
         sql_dtype = map_dtype_to_sql(data_type)
         columns.append(Column(name=column_name, data_type=sql_dtype))
     return columns
+
+
+def get_non_matching_fks(all_tables: dict[str, Table]) -> list[tuple[str, str]]:
+    """Check if the foreign key names match."""
+    non_match_pairs = []
+    for _, table in all_tables.items():
+        for column in table.columns:
+            for fk in column.foreign_keys:
+                other_table = all_tables[fk[0]]
+                other_column = other_table.columns[fk[1]]
+                if other_column.name != column.name:
+                    non_match_pairs.append(
+                        (
+                            f"{table.name}.{column.name}",
+                            f"{other_table.name}.{other_column.name}",
+                        )
+                    )
+    return non_match_pairs
 
 
 def check_if_non_select_query(sql: str) -> bool:
@@ -261,6 +281,7 @@ class Database:
         if base_table is None:
             return None
         new_table = base_table.model_copy(deep=True)
+        new_table.is_deprecated = False
         for old_column_name, new_column_name in column_remap.items():
             for column in new_table.columns:
                 if column.name == old_column_name:
@@ -272,6 +293,12 @@ class Database:
         self._base_table_remapping[name] = new_table
         self._base_tables[name].is_deprecated = True
         return
+
+    def remove_base_table_remaps(self) -> None:
+        """Remove all base table remaps."""
+        self._base_table_remapping = {}
+        for name in self._base_tables:
+            self._base_tables[name].is_deprecated = False
 
     def remove_view(self, name: str) -> None:
         """Remove a view from the database."""

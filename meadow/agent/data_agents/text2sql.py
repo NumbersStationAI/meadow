@@ -199,7 +199,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         if content.endswith("<end>") and "<sql" in content:
             content = content.replace("<end>", "")
         if messages_start_idx < 1:
-            # print(self.system_message)
+            print(self.system_message)
             for msg in messages:
                 print(msg.role)
                 print(msg.content)

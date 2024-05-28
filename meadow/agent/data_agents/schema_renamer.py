@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import Callable
 
 from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
@@ -13,22 +14,23 @@ from meadow.agent.utils import (
 )
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
-from meadow.database.database import Database
+from meadow.database.database import Database, get_non_matching_fks
 from meadow.database.serializer import serialize_as_list
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_RENAME_PROMPT = """Your goal is to clean up a schema to make detecting joins and understanding the data easier for asking queries. You can rename the tables and columns as you see fit.
+DEFAULT_RENAME_PROMPT = """Your goal is to clean up a schema to make detecting joins and understanding the data easier for asking queries. You can rename the columns as you see fit.
 
-The user will give you a schema and you need to output a column name remapping for any column that needs a more descriptive or useful name. Join columns should be the same name and columns that do not join should be named differently. You can also keep the schema the same if you want.
+The user will give you a schema and you need to determine what the join columns are and how, if at all, they should be renamed to be more intuitive. Join columns should be the same name and columns that do not join should be named differently.
+
+Given the schema, first explain what columns join already. Then provide a renaming of the columns that makes the schema more intuitive where join keys match; i.e. tableA.key = tableB.key. If a column does not join, it should not be named to match another join key.
 
 Output the remapping in JSON in the following format:
-
+```json
 {
   "table_name": {
     "old_column1_name": "old_or_new_column1_name",
-    "old_column2_name": "old_or_new_column2_name",
     ...
   },
   "table_name": {
@@ -36,8 +38,7 @@ Output the remapping in JSON in the following format:
     ...
   },
 }
-
-Make sure all new column names are unique. Try to keep changes to a minimum and keep columns as short as possible."""
+```"""
 
 
 def parse_rename_and_update_db(
@@ -50,7 +51,11 @@ def parse_rename_and_update_db(
     content = messages[-1].content
     error_message: str = None
     try:
-        content: dict[str, dict[str, str]] = json.loads(content)
+        if "```json" in content:
+            json_content = re.findall(r"```json\n(.*?)\n```", content, re.DOTALL)[-1]
+        else:
+            json_content = content
+        content: dict[str, dict[str, str]] = json.loads(json_content)
     except json.JSONDecodeError as e:
         error_message = f"The content is not a valid JSON object.\n{e}"
 
@@ -69,15 +74,25 @@ def parse_rename_and_update_db(
 
     if not error_message:
         for table_name, column_mapping in content.items():
-            try:
-                database.add_base_table_column_remap(table_name, column_mapping)
-            except Exception as e:
-                error_message = (
-                    f"Error adding the column remapping for table {table_name}.\n{e}"
-                )
-                break
+            if any(k != v for k, v in column_mapping.items()):
+                try:
+                    database.add_base_table_column_remap(table_name, column_mapping)
+                except Exception as e:
+                    error_message = f"Error adding the column remapping for table {table_name}.\n{e}"
+                    break
+
+    # Make sure FKs match
+    if not error_message:
+        table_as_dict = {tbl.name: tbl for tbl in database.tables}
+        non_match_pairs = get_non_matching_fks(table_as_dict)
+        if non_match_pairs:
+            error_message = (
+                f"The following FKs do not match:\n{non_match_pairs}\nThis may be ineviatable and"
+                " if so, do not worry about changing anything and output the same remapping. Otherwise, please rename."
+            )
 
     if error_message:
+        database.remove_base_table_remaps()
         return AgentMessage(
             role="assistant",
             content=error_message + " Please regenerate mapping and try again.",
@@ -109,10 +124,11 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
         """Initialize the SQL generator agent."""
         self._client = client
         self._llm_config = llm_config
-        if system_prompt == DEFAULT_RENAME_PROMPT:
-            # Response format should be a JSON object for the output
-            self._llm_config = self._llm_config.model_copy()
-            self._llm_config.response_format = {"type": "json_object"}
+        # if system_prompt == DEFAULT_RENAME_PROMPT:
+        #     # Response format should be a JSON object for the output
+        self._llm_config = self._llm_config.model_copy()
+        self._llm_config.max_tokens = 2000
+        # self._llm_config.response_format = {"type": "json_object"}
         self._database = database
         self._executors = executors
         self._system_prompt = system_prompt
@@ -208,11 +224,7 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply when Executor agent."""
-        # The first message should be the schema
-        messages[0].content = (
-            "My schema is\n" + serialize_as_list(self.database.tables)
-            # + "\n\nPlease output the remapping in JSON format."
-        )
+        messages[0].content = "My schema is\n" + serialize_as_list(self.database.tables)
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
