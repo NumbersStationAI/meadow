@@ -1,14 +1,14 @@
 """Executor agent."""
 
 import logging
-import re
 from typing import Callable
+
+from termcolor import colored
 
 from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
 from meadow.agent.data_agents.text2sql_utils import (
-    parse_and_run_single_sql,
+    parse_and_run_sql_for_debugger,
     parse_sql_response,
-    parse_sqls,
 )
 from meadow.agent.executor.reask import ReaskExecutor
 from meadow.agent.schema import AgentMessage
@@ -19,24 +19,25 @@ from meadow.agent.utils import (
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.database import Database
-from meadow.database.serializer import serialize_as_list, serialize_as_xml
+from meadow.database.serializer import serialize_as_list
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DEBUGGER_PROMPT = """You job is to help debug why a given SQL query is erroring. There's a chance nothing is wrong, but there's also a chance the query is incorrect.
 
-The user will provide their schema and associated errored SQL query. You have two possible actions you can take to resolve the issue
+The user will provide their schema and associated empty SQL query. You have three possible actions you can take to resolve the issue
 
-1. [Query] Issue a query on the database of any kind.
+1. [Query] Issue a single SELECT SQL query on the database of any kind.
 2. [Edit] Modify the SQL.
 3. [Do Nothing] If you believe the SQL is correct and the table is appropriately empty.
 
-To take an action, use the following format of
-<step>
-<action>Query/Edit/Do Nothing</action>
-<input>Input to action</input>
-</step>
+You must always output one action of the following form:
+
+---
+Action: Query/Edit/Do Nothing
+Input: ```Input to action in quotes```
+---
 
 At each point in the conversation, you must provide exaction one action you want to take. The user will provide the response and you two will collectively iterate on the issue until it is resolved. Your final goal is to edit the SQL to be correct or do nothing. If you would like, using <thinking> tags to plan the action to take before outputting the <step> tags."""
 
@@ -44,34 +45,15 @@ At each point in the conversation, you must provide exaction one action you want
 def parse_plan(
     message: str,
 ) -> tuple[str, str]:
-    """Extract the plan from the response.
-
-    Plan follows
-    <step>
-    <action>...</action>
-    <input>...</input>
-    </step>
-    """
-    # if "<step>" not in message:
-    #     raise ValueError(
-    #         f"message={message}. Please output a plan in a <step> tag with <action> and <input> tags. Action must be Query, Edit, or Do Nothing."
-    #     )
-    # inner_steps = re.search(r"(<step>.*</step>)", message, re.DOTALL).group(1)
-    # pattern = re.compile(
-    #     r"<step>\s*<action>(.*?)</action>\s*(<input>(.*?)</input>){0,1}\s*</step>",
-    #     re.DOTALL,
-    # )
-    # matches = pattern.findall(inner_steps)
-    # if not matches:
-    #     raise ValueError(
-    #         "Failed to parse the message. Outputs needs to be in <step> tags."
-    #     )
-    # action, _, input = matches[0]
-    print(message)
+    """Extract the plan from the response."""
     if "---" in message:
         inner_steps = message.split("---")[1]
     else:
         inner_steps = message
+    if "Action:" not in inner_steps:
+        raise ValueError(
+            "Action is not in the message. Please use\nAction: Query, Edit, or Do Nothing\nInput: ```Input to action in quotes```."
+        )
     if "Input:" not in inner_steps:
         action = inner_steps.split("Action:", 1)[1].strip()
         assert action == "Do Nothing", f"Action is {action}. Please use Do Nothing."
@@ -80,7 +62,6 @@ def parse_plan(
         action, input = inner_steps.split("Action:", 1)[1].split("Input:", 1)
     action = action.strip()
     input = input.strip().strip("```sql").strip("```")
-    print("ACTION", action, "INPUT", input)
     if action not in ["Query", "Edit", "Do Nothing"]:
         raise ValueError(
             f"Unknown action {action}. Please use Query or Edit or Do Nothing."
@@ -99,7 +80,16 @@ def parse_plan_and_take_action(
     E.g. parse a SQL query and run it.
     """
     content = messages[-1].content
-    action, input = parse_plan(content)
+    try:
+        action, input = parse_plan(content)
+    except ValueError as e:
+        assert can_reask_again, "TODO: Handle this case."
+        return AgentMessage(
+            role="assistant",
+            content=f"Error parsing the plan.\n{e}",
+            requires_response=True,
+            sending_agent=agent_name,
+        )
     if action == "Edit":
         message = AgentMessage(
             role="assistant", content=f"<sql>\n{input}</sql>", sending_agent=agent_name
@@ -112,7 +102,7 @@ def parse_plan_and_take_action(
         message = AgentMessage(
             role="assistant", content=f"{input}", sending_agent=agent_name
         )
-        response = parse_and_run_single_sql(
+        response = parse_and_run_sql_for_debugger(
             [message], agent_name, database, can_reask_again
         )
         # We know that a "Query" message requires a response from this agent
@@ -287,8 +277,10 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
             can_reask_again,
         )
         if parsed_response.requires_response:
+            # Adding the data to the schema for the debugger makes it often think it's seeing the entire table
+            # and make mistakes wrt filters. Better to leave the data out.
             error_message = f"""My schema is:
-{serialize_as_list(self._database.tables)}
+{serialize_as_list(self._database.tables, add_data=False)}
 
 {parsed_response.content}"""
             assert len(messages) == 1
@@ -329,7 +321,7 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
             print(msg.role)
             print(msg.content)
             print("------")
-        print("EMTPY RESULT AGENT CONTENT", content)
+        print(colored(f"EMTPY RESULT AGENT CONTENT {content}", "blue"))
         print("*****")
 
         return AgentMessage(

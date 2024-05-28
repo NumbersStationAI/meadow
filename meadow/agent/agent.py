@@ -31,6 +31,11 @@ class Agent:
         ...
 
     @property
+    def planner(self) -> "LLMPlannerAgent":
+        """The planner of the agent."""
+        return None
+
+    @property
     def executors(self) -> list["ExecutorAgent"] | None:
         """The executors of the agent."""
         return None
@@ -88,6 +93,32 @@ class LLMAgentWithExecutors(LLMAgent):
         """Set the chat role of the agent.
 
         Only used for agents that have executors."""
+        raise NotImplementedError
+
+
+class SubTask:
+    """Sub-task in a plan."""
+
+    agent: "Agent"
+    prompt: str
+
+    def __init__(self, agent: "Agent", prompt: str):
+        self.agent = agent
+        self.prompt = prompt
+
+
+class LLMPlannerAgent(LLMAgent):
+    """Agent that makes plan."""
+
+    @property
+    @abstractmethod
+    def available_agents(self) -> dict[str, "Agent"]:
+        """Get the available agents."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def move_to_next_agent(self) -> "SubTask":
+        """Move to the next agent in the task plan."""
         raise NotImplementedError
 
 

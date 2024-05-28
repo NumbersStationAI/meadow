@@ -69,6 +69,7 @@ async def generate_llm_reply(
         seed=llm_config.seed,
         temperature=llm_config.temperature,
         max_tokens=llm_config.max_tokens,
+        response_format=llm_config.response_format,
         overwrite_cache=overwrite_cache,
     )
     if llm_callback:

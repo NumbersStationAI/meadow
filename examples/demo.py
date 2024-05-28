@@ -7,7 +7,6 @@ from meadow.agent.agent import Agent
 from meadow.agent.controller import ControllerAgent
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent, parse_sql_response
 from meadow.agent.data_agents.text2sql_utils import check_empty_table
-from meadow.agent.exectors.reask import ReaskExecutor
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
 from meadow.cache import DuckDBCache
@@ -19,8 +18,8 @@ from meadow.database.connector.sqlite import SQLiteConnector
 from meadow.database.database import Database
 
 sys.path.append("/home/lorr1/projects/code/meadow/experiments/text2sql")
-from eval_user import EvalUserAgent
 from agent_factory import SIMPLE_SQL_PROMPT
+from eval_user import EvalUserAgent
 
 
 def get_simple_text2sql_agent(

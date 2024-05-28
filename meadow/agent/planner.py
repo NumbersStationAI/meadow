@@ -3,7 +3,6 @@
 import json
 import logging
 import re
-import xml.etree.ElementTree as ElementTree
 from queue import Queue
 from typing import Callable
 
@@ -11,9 +10,9 @@ from pydantic import BaseModel
 
 from meadow.agent.agent import (
     Agent,
-    LLMAgent,
+    LLMPlannerAgent,
+    SubTask,
 )
-from meadow.agent.data_agents.attribute_detector import AttributeDetectorAgent
 from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.utils import (
     generate_llm_reply,
@@ -22,12 +21,40 @@ from meadow.agent.utils import (
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.database import Database
-from meadow.database.serializer import serialize_as_list, serialize_as_xml
+from meadow.database.serializer import serialize_as_list
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve. For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. You can use the same agent multiple times. If you are confused by the task or need more details, please ask for feedback. The user may also provide suggestions to the plan that you should take into account when generating the plan. When generating a plan, please use the following tag format to specify the plan.
+# DEFAULT_PLANNER_PROMPT = """Below is the data schema the user is working with.
+# {serialized_schema}
+
+# Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
+
+# For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. If you want to refer to a previous step, use 'stepXX'. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
+
+# <steps>
+# <step1>
+# <agent>...</agent>
+# <instruction>...</instruction>
+# </step1>
+# <step2>
+# ...
+# </step2>
+# ...
+# </steps>
+
+# You have access to the following agents.
+
+# <agents>
+# {agents}
+# </agents>
+
+# Out a single plan."""
+
+DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
+
+For each sub-step in the sequence, indicate which agent should perform the task and generate a detailed instruction for the agent to follow. You can use an agent more than once. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
 
 <steps>
 <step1>
@@ -42,14 +69,14 @@ DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the use
 
 If the user responds back at some point with a message that indicates the user is satisfied with the plan, ONLY output {termination_message} tags to signal an end to the conversation. {termination_message} tags should only be used in isolation of all other tags.
 
-Below is the data schema the user is working with.
-{serialized_schema}
-
-Below are the agents you have access to.
+You have access to the following agents.
 
 <agents>
 {agents}
 </agents>
+
+Below is the data schema the user is working with.
+{serialized_schema}
 """
 
 
@@ -60,15 +87,30 @@ class SubTaskForParse(BaseModel):
     prompt: str
 
 
-class SubTask:
-    """Sub-task in a plan."""
+def parse_replacements_in_instruction(instruction: str) -> list[str]:
+    """Parse the agent name in the instruction."""
+    instruction_replacements = re.findall(r"\{(.*?)\}", instruction)
+    if len(instruction_replacements) == 0:
+        return []
+    return instruction_replacements
 
-    agent: Agent
-    prompt: str
 
-    def __init__(self, agent: Agent, prompt: str):
-        self.agent = agent
-        self.prompt = prompt
+def swap_instruction_replacements_with_agent_names(
+    parsed_plan: list[SubTaskForParse],
+) -> list[SubTaskForParse]:
+    """Replace {{stepXX}} with {{agentNameXX}} for use in the Controller so it knows what conversation to use."""
+    for i, sub_task in enumerate(parsed_plan):
+        instruction_replacements = parse_replacements_in_instruction(sub_task.prompt)
+        for to_replace in instruction_replacements:
+            task_i = re.search(r"\d+", to_replace).group(0)
+            if int(task_i) >= len(parsed_plan):
+                raise ValueError(
+                    f"Step {task_i} is not yet defined for replacement in step {i}."
+                )
+            parsed_plan[i].prompt = parsed_plan[i].prompt.replace(
+                f"{{{to_replace}}}", f"{{{parsed_plan[int(task_i) - 1].agent_name}}}"
+            )
+    return parsed_plan
 
 
 def parse_steps(input_str: str) -> list[tuple[str, str]]:
@@ -112,7 +154,50 @@ def parse_plan(
             raise ValueError(
                 f"Agent {agent} not found in available agents. Please only use {', '.join(available_agents.keys())}"
             )
+        if agent == "AttributeDetector" and "{" in instruction:
+            raise ValueError(
+                f"AttributeDetector agent cannot have any replacement tags in the instruction. instruction={instruction}"
+            )
+        # if agent in {"SQLGenerator", "NestedSQLGenerator"} and "{" in instruction:
+        #     copied_plan = [p.model_copy() for p in plan] + [
+        #         SubTaskForParse(agent_name=agent, prompt=instruction)
+        #     ]
+        #     fake_plan = swap_instruction_replacements_with_agent_names(copied_plan)
+        #     if "SQLGenerator" or "NestedSQLGenerator" in [
+        #         p.agent_name for p in fake_plan
+        #     ]:
+        #         raise ValueError(
+        #             "SQLGenerator cannot take as input the output of another SQLGenerator or NestedSQLGenerator agent. If you wish to refer to their previous steps, please just say 'stepXX'"
+        #         )
+
+        if agent == "NestedSQLGenerator" and "NestedSQLGenerator" in [
+            p.agent_name for p in plan
+        ]:
+            raise ValueError(
+                "Only one NestedSQLGenerator agent can be used in a plan without any SQLGenerator agents. "
+                "This agent decomposes the question for you."
+            )
+        if agent == "SQLGenerator" and "NestedSQLGenerator" in [
+            p.agent_name for p in plan
+        ]:
+            raise ValueError(
+                "SQLGenerator agent cannot be used in a plan with a NestedSQLGenerator agent. "
+                "Just use one NestedSQLGenerator agent to decompose the question."
+            )
+        if agent == "SQLGenerator" and "SQLGenerator" in [p.agent_name for p in plan]:
+            raise ValueError(
+                "SQLGenerator agent can only be used once. Please rewrite to just have a single <agent>SQLGenerator</agent> in the plan."
+            )
         plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
+
+    for i, p in enumerate(plan):
+        if p.agent_name == "SQLPlanner" and not any(
+            f"{{step{i + 1}}}" in p.prompt for p in plan
+        ):
+            raise ValueError(
+                f"SQLPlanner agent's output must be used in a future step, but it is not. Please either remove the SQLPlanner or use it's output via {{step{i + 1}}}."
+            )
+
     return AgentMessage(
         role="assistant",
         content=json.dumps([m.model_dump() for m in plan]),
@@ -123,7 +208,7 @@ def parse_plan(
     )
 
 
-class PlannerAgent(LLMAgent):
+class PlannerAgent(LLMPlannerAgent):
     """Agent that generates a plan for a task."""
 
     def __init__(
@@ -148,23 +233,6 @@ class PlannerAgent(LLMAgent):
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
-        self._attribute_agent = AttributeDetectorAgent(
-            client=self._client,
-            llm_config=self._llm_config,
-            database=self._database,
-        )
-        # # Override with defaults
-        # if self._executors is None:
-        #     self._executors = [
-        #         ReaskExecutorAgent(
-        #             client=self._client,
-        #             llm_config=self._llm_config,
-        #             database=self._database,
-        #             execution_func=partial(
-        #                 parse_plan, available_agents=self._available_agents
-        #             ),
-        #         )
-        #     ]
 
     @property
     def name(self) -> str:
@@ -199,9 +267,10 @@ class PlannerAgent(LLMAgent):
             ),
         )
 
-    def has_plan(self) -> bool:
-        """Check if the agent has a plan."""
-        return not self._plan.empty()
+    @property
+    def available_agents(self) -> dict[str, Agent]:
+        """Get the available agents."""
+        return self._available_agents
 
     def move_to_next_agent(
         self,
@@ -241,12 +310,6 @@ class PlannerAgent(LLMAgent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        # update the message history
-        # TODO: refactor this formatting
-        # if len(self._messages.get_messages(sender)) == 0:
-        #     message.content = f"<objective>{message.content}</objective>"
-        # else:
-        #     message.content = f"<feedback>{message.content}</feedback>"
         self._messages.add_message(agent=sender, role="user", message=message)
 
         reply = await self.generate_reply(
@@ -263,7 +326,7 @@ class PlannerAgent(LLMAgent):
         if self.llm_client is not None:
             chat_response = await generate_llm_reply(
                 client=self.llm_client,
-                messages=[attribute_response],
+                messages=messages,
                 tools=[],
                 system_message=AgentMessage(
                     role="system",
@@ -276,7 +339,7 @@ class PlannerAgent(LLMAgent):
             )
             content = chat_response.choices[0].message.content
             # print(self.system_message)
-            print(messages[-1].content)
+            print("QUESTION", messages[-1].content)
             print("CONTENT PLANNER", content)
             print("*****")
             if Commands.has_end(content):
@@ -289,39 +352,69 @@ class PlannerAgent(LLMAgent):
                 )
             else:
                 display_content = None
-                try:
-                    parsed_plan_message = parse_plan(
-                        content, self.name, self._available_agents
-                    )
-                    display_content = parsed_plan_message.display_content
-                    parsed_plan = [
-                        SubTaskForParse(**m)
-                        for m in json.loads(parsed_plan_message.content)
-                    ]
-                    # If the plan is just a single step, replace with the direct question from the user with the attributes
-                    if len(parsed_plan) == 1:
-                        parsed_plan[0].prompt = (
-                            messages[-1]
-                            .content.replace("<objective>", "")
-                            .replace("</objective>", "")
+                # TODO: refactor using executors
+                messages_copy = messages
+                attempt_i = 0
+                while attempt_i <= 2:
+                    attempt_i += 1
+                    try:
+                        parsed_plan_message = parse_plan(
+                            content,
+                            self.name,
+                            self._available_agents,
                         )
-                    # Else, add the attributes to the final step
-                    else:
-                        parsed_plan[
-                            -1
-                        ].prompt += f" The final attributes should be {attributes}."
-                    for sub_task in parsed_plan:
-                        self._plan.put(
-                            SubTask(
-                                agent=self._available_agents[sub_task.agent_name],
-                                prompt=sub_task.prompt,
+                        break
+                    except Exception as e:
+                        print(e)
+                        # Do one LLM reask
+                        messages_copy = [m.model_copy() for m in messages_copy]
+                        messages_copy.append(
+                            AgentMessage(
+                                role="assistant",
+                                content=content,
+                                sending_agent=self.name,
                             )
                         )
-                except Exception as e:
-                    logger.warning(
-                        f"Error in parsing plan. Ignoring as executor should throw error back to fix. e={e}, message={content}."
+                        messages_copy.append(
+                            AgentMessage(
+                                role="user",
+                                content=(str(e) + " Please retry."),
+                                sending_agent="User",
+                            )
+                        )
+                        chat_response = await generate_llm_reply(
+                            client=self.llm_client,
+                            messages=messages_copy,
+                            tools=[],
+                            system_message=AgentMessage(
+                                role="system",
+                                content=self.system_message,
+                                sending_agent=self.name,
+                            ),
+                            llm_config=self._llm_config,
+                            llm_callback=self._llm_callback,
+                            overwrite_cache=self._overwrite_cache,
+                        )
+                        content = chat_response.choices[0].message.content
+                        print("CONTENT PLANNER REDO", content)
+                        print("*****")
+
+                display_content = parsed_plan_message.display_content
+                parsed_plan = [
+                    SubTaskForParse(**m)
+                    for m in json.loads(parsed_plan_message.content)
+                ]
+                # Handle agent name swaps
+                parsed_plan = swap_instruction_replacements_with_agent_names(
+                    parsed_plan
+                )
+                for sub_task in parsed_plan:
+                    self._plan.put(
+                        SubTask(
+                            agent=self._available_agents[sub_task.agent_name],
+                            prompt=sub_task.prompt,
+                        )
                     )
-                    raise e
                 return AgentMessage(
                     role="assistant",
                     content=content,

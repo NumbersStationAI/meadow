@@ -48,6 +48,23 @@ def read_tables_json(
         if lowercase:
             table_names = [tn.lower() for tn in table_names]
 
+        # Stores the start index of each table to get relative column index
+        # Input: [[-1, '*'], [0, 'Perpetrator_ID'], [0, 'People_ID'], [0, 'Date'], [1, 'People_ID'], [1, 'Name']]
+        # Output: [-1, 1, 4]
+        db_table_col_offset_start = []
+        cur_ti = 0
+        cur_idx = 1
+        for idx, (ti, col_name) in enumerate(db["column_names_original"]):
+            if ti == -1:
+                db_table_col_offset_start.append(-1)
+            else:
+                if ti == cur_ti:
+                    db_table_col_offset_start.append(cur_idx)
+                else:
+                    cur_ti = ti
+                    cur_idx = idx
+                    db_table_col_offset_start.append(cur_idx)
+
         data_sample_query = "SELECT DISTINCT * FROM {} LIMIT 5"
         dfs = [
             connector.run_sql_to_df(data_sample_query.format(tn))
@@ -70,8 +87,9 @@ def read_tables_json(
             for fk in fks:
                 if idx == fk[0]:
                     other_column = db["column_names_original"][fk[1]]
+                    other_column_index = fk[1] - db_table_col_offset_start[fk[1]]
                     other_table = table_names[other_column[0]]
-                    foreign_keys.append((other_table, other_column[1]))
+                    foreign_keys.append((other_table, other_column_index))
             tables[table_names[ti]].append(
                 Column(
                     name=col_name,
@@ -172,11 +190,9 @@ def execution_accuracy(
     pred: str,
     database: Database,
     client: Client,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """Evaluate execution accuracy for one example."""
     final_score = 0
-    if "5000" in gold:
-        print("HERE")
     assert gold, "Gold SQL is empty"
     if not pred:
         return 0, 0
@@ -217,4 +233,9 @@ Predicted DataFrames:
         empty_res = 0
     else:
         empty_res = 1
-    return final_score, empty_res
+    # Check if gold empty or None value
+    if df_gold.empty or all(df_gold.isnull().all()):
+        empty_gold_res = 0
+    else:
+        empty_gold_res = 1
+    return final_score, empty_res, empty_gold_res
