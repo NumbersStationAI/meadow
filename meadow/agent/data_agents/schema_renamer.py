@@ -7,7 +7,7 @@ from typing import Callable
 
 from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
 from meadow.agent.executor.reask import ReaskExecutor
-from meadow.agent.schema import AgentMessage, ExecutorFunctionInput
+from meadow.agent.schema import AgentMessage, ClientMessageRole, ExecutorFunctionInput
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -95,14 +95,12 @@ def parse_rename_and_update_db(
     if error_message:
         input.database.remove_base_table_remaps()
         return AgentMessage(
-            role="assistant",
             content=error_message + " Please regenerate mapping and try again.",
             requires_response=True,
             sending_agent=input.agent_name,
         )
 
     return AgentMessage(
-        role="assistant",
         content="The schema has been updated.",
         sending_agent=input.agent_name,
     )
@@ -196,7 +194,9 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
         if not message:
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -211,7 +211,9 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -230,7 +232,7 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
             messages=messages,
             tools=[],
             system_message=AgentMessage(
-                role="system",
+                agent_role=ClientMessageRole.SYSTEM,
                 content=self.system_message,
                 sending_agent=self.name,
             ),
@@ -245,7 +247,6 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
         print(content)
         print("-----")
         return AgentMessage(
-            role="assistant",
             content=content,
             sending_agent=self.name,
             requires_execution=True,

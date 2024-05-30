@@ -14,7 +14,7 @@ from meadow.agent.agent import (
     SubTask,
 )
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
-from meadow.agent.schema import AgentMessage, Commands
+from meadow.agent.schema import AgentMessage, ClientMessageRole, Commands
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -88,7 +88,6 @@ def parse_plan(
     for instruction in parsed_steps:
         plan.append(SubTaskForParse(agent_name=agent_to_use, prompt=instruction))
     return AgentMessage(
-        role="assistant",
         content=json.dumps([m.model_dump() for m in plan]),
         display_content=message,
         tool_calls=None,
@@ -183,7 +182,9 @@ class SQLDecomposerAgent(LLMPlannerAgent):
             logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -198,7 +199,9 @@ class SQLDecomposerAgent(LLMPlannerAgent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -217,7 +220,7 @@ class SQLDecomposerAgent(LLMPlannerAgent):
                 messages=messages,
                 tools=[],
                 system_message=AgentMessage(
-                    role="system",
+                    agent_role=ClientMessageRole.SYSTEM,
                     content=self.system_message,
                     sending_agent=self.name,
                 ),
@@ -232,7 +235,6 @@ class SQLDecomposerAgent(LLMPlannerAgent):
             print("*****")
             if Commands.has_end(content):
                 return AgentMessage(
-                    role="assistant",
                     content=content,
                     tool_calls=None,
                     sending_agent=self.name,
@@ -268,7 +270,6 @@ class SQLDecomposerAgent(LLMPlannerAgent):
                     )
                     raise e
                 return AgentMessage(
-                    role="assistant",
                     content=content,
                     display_content=display_content,
                     sending_agent=self.name,
@@ -281,7 +282,6 @@ class SQLDecomposerAgent(LLMPlannerAgent):
             self._plan.put(SubTask(agent=agent, prompt=raw_content))
             serialized_plan = f"<steps><step1><agent>{agent.name}</agent><instruction>{raw_content}</instruction></step1></steps>"
             return AgentMessage(
-                role="assistant",
                 content=serialized_plan,
                 sending_agent=self.name,
             )

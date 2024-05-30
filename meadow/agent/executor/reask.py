@@ -5,7 +5,7 @@ import logging
 from typing import Callable
 
 from meadow.agent.agent import Agent, ExecutorAgent
-from meadow.agent.schema import AgentMessage, ExecutorFunctionInput
+from meadow.agent.schema import AgentMessage, ClientMessageRole, ExecutorFunctionInput
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -106,7 +106,9 @@ class ReaskExecutor(ExecutorAgent):
         if not message:
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -125,7 +127,9 @@ class ReaskExecutor(ExecutorAgent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -166,16 +170,23 @@ class ReaskExecutor(ExecutorAgent):
             messages_copy = []
             for m in messages:
                 m_copy = m.model_copy()
-                m_copy.role = "user" if m.role == "assistant" else "assistant"
+                m_copy.agent_role = (
+                    ClientMessageRole.RECEIVER
+                    if m.agent_role == ClientMessageRole.SENDER
+                    else ClientMessageRole.SENDER
+                )
+                # Set the message role, too (this is typically done internally)
+                m_copy.role = m_copy.agent_role.value
                 messages_copy.append(m_copy)
-            parsed_response.role = "user"
+            parsed_response.agent_role = ClientMessageRole.RECEIVER
+            parsed_response.role = parsed_response.agent_role.value
             messages_copy.append(parsed_response)
             chat_response = await generate_llm_reply(
                 client=self.llm_client,
                 messages=messages_copy,
                 tools=[],
                 system_message=AgentMessage(
-                    role="system",
+                    agent_role=ClientMessageRole.SYSTEM,
                     content=self.system_message,
                     sending_agent=self.name,
                 ),
@@ -185,7 +196,6 @@ class ReaskExecutor(ExecutorAgent):
             )
             content = chat_response.choices[0].message.content
             return AgentMessage(
-                role="assistant",
                 content=content,
                 requires_response=True,
                 sending_agent=self.name,

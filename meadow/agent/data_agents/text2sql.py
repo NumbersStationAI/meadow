@@ -15,7 +15,7 @@ from meadow.agent.executor.data_executors.empty_result_debugger import (
 from meadow.agent.executor.data_executors.sql_validate_reask import (
     SQLValidateExecutor,
 )
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, ClientMessageRole
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -133,7 +133,9 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         if not message:
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -148,7 +150,9 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -178,7 +182,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
             messages=messages,
             tools=[],
             system_message=AgentMessage(
-                role="system",
+                agent_role=ClientMessageRole.SYSTEM,
                 content=self.system_message,
                 sending_agent=self.name,
             ),
@@ -203,7 +207,6 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
             print("SQL AGENT CONTENT", content)
             print("*****")
         return AgentMessage(
-            role="assistant",
             content=content,
             tool_calls=None,
             sending_agent=self.name,

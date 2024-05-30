@@ -57,6 +57,13 @@ async def generate_llm_reply(
     overwrite_cache: bool = False,
 ) -> ChatResponse:
     """Generate a reply using autogen.oai."""
+    # Make sure the chat role is updated wrt to the agent role
+    # This should technically be handled in the agents, but if someone
+    # forgets to update the role from the agent_role, we do it here
+    system_message.role = system_message.agent_role.value
+    for message in messages:
+        message.role = message.agent_role.value
+    # Now dump to dict to pass to client
     serialized_messages = [system_message.model_dump(include={"role", "content"})]
     serialized_messages += [m.model_dump(include={"role", "content"}) for m in messages]
     chat_response = await client.chat(

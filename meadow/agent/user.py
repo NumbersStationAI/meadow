@@ -68,4 +68,4 @@ class UserAgent(Agent):
         """Generate a reply based on the received messages."""
         # Get the input from a user
         reply = input(">>> ")
-        return AgentMessage(role="assistant", content=reply, sending_agent=self.name)
+        return AgentMessage(content=reply, sending_agent=self.name)
