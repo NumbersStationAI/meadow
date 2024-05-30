@@ -18,7 +18,7 @@ def chat_response() -> ChatResponse:
                 index=0,
                 message=ChatMessage(
                     content=None,
-                    role="assistant",
+                    role=ClientMessageRole.SENDER,
                     tool_calls=[
                         ToolCall(
                             unparsed_arguments='{"question":"What is the total revenue by product category for the year 2021?"}',

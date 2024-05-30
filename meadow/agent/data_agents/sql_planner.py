@@ -9,7 +9,7 @@ from meadow.agent.agent import (
     LLMAgent,
     SubTask,
 )
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, ClientMessageRole
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -118,7 +118,9 @@ class SQLPlannerAgent(LLMAgent):
         if not message:
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -133,7 +135,9 @@ class SQLPlannerAgent(LLMAgent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -151,7 +155,7 @@ class SQLPlannerAgent(LLMAgent):
             messages=messages,
             tools=[],
             system_message=AgentMessage(
-                role="system",
+                agent_role=ClientMessageRole.SYSTEM,
                 content=self.system_message,
                 sending_agent=self.name,
             ),
@@ -161,7 +165,6 @@ class SQLPlannerAgent(LLMAgent):
         )
         content = chat_response.choices[0].message.content
         return AgentMessage(
-            role="assistant",
             content=content,
             sending_agent=self.name,
         )

@@ -12,7 +12,7 @@ from meadow.agent.data_agents.text2sql_utils import (
     parse_sql_response,
 )
 from meadow.agent.executor.reask import ReaskExecutor
-from meadow.agent.schema import AgentMessage, ExecutorFunctionInput
+from meadow.agent.schema import AgentMessage, ClientMessageRole, ExecutorFunctionInput
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -88,14 +88,12 @@ def parse_plan_and_take_action(
     except ValueError as e:
         assert input.can_reask_again, "TODO: Handle this case."
         return AgentMessage(
-            role="assistant",
             content=f"Error parsing the plan.\n{e}",
             requires_response=True,
             sending_agent=input.agent_name,
         )
     if action == "Edit":
         message = AgentMessage(
-            role="assistant",
             content=f"<sql>\n{input_inst}</sql>",
             sending_agent=input.agent_name,
         )
@@ -108,7 +106,8 @@ def parse_plan_and_take_action(
         return parse_sql_response(input_copy)
     elif action == "Query":
         message = AgentMessage(
-            role="assistant", content=f"{input_inst}", sending_agent=input.agent_name
+            content=f"{input_inst}",
+            sending_agent=input.agent_name,
         )
 
         input_copy = copy.copy(input)
@@ -123,7 +122,6 @@ def parse_plan_and_take_action(
         view_name = f"sql{input.database.get_number_of_views()}"
         sql = input.database.get_table(view_name).view_sql
         return AgentMessage(
-            role="assistant",
             content=f"<sql>\n{sql}</sql>",
             display_content=f"SQL:\n{sql}",
             sending_agent=input.agent_name,
@@ -237,7 +235,9 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         if not message:
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -256,7 +256,9 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -313,7 +315,7 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
             messages=messages,
             tools=[],
             system_message=AgentMessage(
-                role="system",
+                agent_role=ClientMessageRole.SYSTEM,
                 content=self.system_message,
                 sending_agent=self.name,
             ),
@@ -331,7 +333,6 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         print("*****")
 
         return AgentMessage(
-            role="assistant",
             content=content,
             tool_calls=None,
             sending_agent=self.name,

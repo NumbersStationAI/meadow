@@ -4,7 +4,7 @@ import logging
 from typing import Callable
 
 from meadow.agent.agent import Agent, LLMAgent
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, ClientMessageRole
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -108,7 +108,9 @@ class AttributeDetectorAgent(LLMAgent):
         if not message:
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -123,7 +125,9 @@ class AttributeDetectorAgent(LLMAgent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -141,7 +145,7 @@ class AttributeDetectorAgent(LLMAgent):
             messages=messages,
             tools=[],
             system_message=AgentMessage(
-                role="system",
+                agent_role=ClientMessageRole.SYSTEM,
                 content=self.system_message,
                 sending_agent=self.name,
             ),
@@ -152,7 +156,6 @@ class AttributeDetectorAgent(LLMAgent):
         content = chat_response.choices[0].message.content
         content = content.split("Attributes:", 1)[-1].strip()
         return AgentMessage(
-            role="assistant",
             content=messages[-1].content
             + f" The final attributes should be {content}.",
             sending_agent=self.name,

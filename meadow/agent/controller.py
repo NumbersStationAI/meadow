@@ -4,7 +4,7 @@ import logging
 
 from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMPlannerAgent
 from meadow.agent.planner import PlannerAgent, parse_replacements_in_instruction
-from meadow.agent.schema import AgentMessage, Commands
+from meadow.agent.schema import AgentMessage, ClientMessageRole, Commands
 from meadow.agent.utils import print_message
 from meadow.database.database import Database
 from meadow.history.message_history import MessageHistory
@@ -88,7 +88,9 @@ class ControllerAgent(Agent):
         # print("MESSAGE", message.content, "\n\nDISPLAY", message.display_content)
         # print("-----")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -111,7 +113,9 @@ class ControllerAgent(Agent):
         # )
         # print("MESSAGE", message.content, "\n\nDISPLAY", message.display_content)
         # print("-----")
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -124,12 +128,13 @@ class ControllerAgent(Agent):
             and self._current_agent == self._supervisor
         ):
             auto_response = AgentMessage(
-                role="assistant",
                 content=Commands.NEXT,
                 sending_agent=self.name,
             )
             self._messages.add_message(
-                agent=self._supervisor, role="assistant", message=reply
+                agent=self._supervisor,
+                agent_role=ClientMessageRole.SENDER,
+                message=reply,
             )
             await self.receive(auto_response, self._supervisor)
         else:
@@ -181,7 +186,9 @@ class ControllerAgent(Agent):
                 # The conversation is now over, so we need to set the current agent to
                 # the supervisor and add the final message to this controller's message history.
                 self._messages.add_message(
-                    agent=self._current_agent, role="user", message=executor_response
+                    agent=self._current_agent,
+                    agent_role=ClientMessageRole.RECEIVER,
+                    message=executor_response,
                 )
                 self.set_current_agent(self._supervisor)
             else:
@@ -194,7 +201,6 @@ class ControllerAgent(Agent):
             next_display = messages[-1].display_content
             is_termination_message = True
         return AgentMessage(
-            role="assistant",
             content=next_message,
             display_content=next_display,
             sending_agent=self.name,
@@ -215,7 +221,6 @@ class ControllerAgent(Agent):
         """
         executor_response = None
         default_response = AgentMessage(
-            role="assistant",
             content=messages[-1].content,
             display_content=messages[-1].display_content,
             sending_agent=self.name,
@@ -291,7 +296,6 @@ class ControllerAgent(Agent):
             if sender == self._supervisor:
                 self.set_current_agent(self._supervisor)
                 return AgentMessage(
-                    role="assistant",
                     content=messages[-1].content,
                     display_content=messages[-1].display_content,
                     sending_agent=self.name,
@@ -311,7 +315,9 @@ class ControllerAgent(Agent):
         Will return the last non termination message sent to the supervisor.
         """
         message = AgentMessage(
-            role="user", content=input, sending_agent=self._supervisor.name
+            agent_role=ClientMessageRole.RECEIVER,
+            content=input,
+            sending_agent=self._supervisor.name,
         )
         await self.receive(message, self._supervisor)
         # The last message send to the controller that isn't a NEXT or END

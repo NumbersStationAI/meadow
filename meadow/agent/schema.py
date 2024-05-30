@@ -3,9 +3,8 @@
 import enum
 import logging
 import time
-from typing import Any, Callable
 
-from pydantic import BaseModel, model_validator
+from pydantic import field_validator, model_validator
 
 from meadow.client.schema import ChatMessage
 from meadow.database.database import Database
@@ -14,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class Commands:
+    """DSL commands interpreted by the controller."""
+
     NEXT = "<next>"
     END = "<end>"
 
@@ -26,11 +27,39 @@ class Commands:
 
     @staticmethod
     def has_next(content: str) -> bool:
+        """Check if the message contains the next signal."""
         return Commands._has_signal_string(content, Commands.NEXT)
 
     @staticmethod
     def has_end(content: str) -> bool:
+        """Check if the message contains the end signal."""
         return Commands._has_signal_string(content, Commands.END)
+
+
+class ClientMessageRole(str, enum.Enum):
+    """The role of the author of the message.
+
+    LLMs in chat messages require the role to be "user", "assistant", or "system".
+    In the agent chat framework, the role is determined by if an agent is sending
+    or receiving a message. We handle that mapping here.
+    """
+
+    SENDER = "assistant"
+    RECEIVER = "user"
+    """Used internally for agents to define their own system messages for the LLM."""
+    SYSTEM = "system"
+
+
+class AgentRole(enum.Enum):
+    """Agent role.
+
+    In conversations, an agent can either be a supervisor (i.e. the instigator
+    of the conversation) or the executor (i.e the responder). Some agents serve both
+    and their role determines how they respond.
+    """
+
+    SUPERVISOR = enum.auto()
+    EXECUTOR = enum.auto()
 
 
 class AgentMessage(ChatMessage):
@@ -45,6 +74,9 @@ class AgentMessage(ChatMessage):
     sending_agent: str
 
     receiving_agent: str | None = None
+
+    """The agent role of this message."""
+    agent_role: ClientMessageRole = ClientMessageRole.SENDER
 
     is_termination_message: bool = False
 
@@ -66,15 +98,17 @@ class AgentMessage(ChatMessage):
             self.display_content = self.content
         return self
 
-
-class AgentRole(enum.Enum):
-    """Agent role."""
-
-    SUPERVISOR = enum.auto()
-    EXECUTOR = enum.auto()
+    @model_validator(mode="after")
+    def set_chat_role(self) -> "AgentMessage":
+        """
+        Set chat message role from the agent_role.
+        """
+        self.role = self.agent_role.value
 
 
 class ExecutorFunctionInput:
+    """Input for an executor function."""
+
     def __init__(
         self,
         messages: list[AgentMessage],

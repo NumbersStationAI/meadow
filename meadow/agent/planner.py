@@ -17,7 +17,13 @@ from meadow.agent.agent import (
     SubTask,
 )
 from meadow.agent.executor.reask import ReaskExecutor
-from meadow.agent.schema import AgentMessage, AgentRole, Commands, ExecutorFunctionInput
+from meadow.agent.schema import (
+    AgentMessage,
+    AgentRole,
+    ClientMessageRole,
+    Commands,
+    ExecutorFunctionInput,
+)
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -163,20 +169,17 @@ def parse_plan(
     if error_message:
         if input.can_reask_again:
             return AgentMessage(
-                role="assistant",
                 content=error_message.strip() + " Please retry.",
                 requires_response=True,
                 sending_agent=input.agent_name,
             )
         else:
             return AgentMessage(
-                role="assistant",
                 content=f"Current plan.\n\n{message}\n\nWe're having trouble generating a plan. Please try to rephrase.",
                 sending_agent=input.agent_name,
             )
 
     return AgentMessage(
-        role="assistant",
         content=json.dumps([m.model_dump() for m in plan]),
         display_content=inner_steps,
         sending_agent=input.agent_name,
@@ -298,7 +301,9 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
         if not message:
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
-        self._messages.add_message(agent=recipient, role="assistant", message=message)
+        self._messages.add_message(
+            agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
+        )
         await recipient.receive(message, self)
 
     async def receive(
@@ -313,7 +318,9 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        self._messages.add_message(agent=sender, role="user", message=message)
+        self._messages.add_message(
+            agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
+        )
 
         reply = await self.generate_reply(
             messages=self._messages.get_messages(sender), sender=sender
@@ -332,7 +339,7 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                 messages=messages,
                 tools=[],
                 system_message=AgentMessage(
-                    role="system",
+                    agent_role=ClientMessageRole.SYSTEM,
                     content=self.system_message,
                     sending_agent=self.name,
                 ),
@@ -347,7 +354,6 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
             print("*****")
             if Commands.has_end(content):
                 return AgentMessage(
-                    role="assistant",
                     content=content,
                     sending_agent=self.name,
                     is_termination_message=True,
@@ -362,7 +368,6 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                     input=ExecutorFunctionInput(
                         messages=[
                             AgentMessage(
-                                role="assistant",
                                 content=content,
                                 sending_agent=self.name,
                             )
@@ -390,7 +395,6 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                     logger.warning(f"Error in planner. e={e}")
                     pass
                 return AgentMessage(
-                    role="assistant",
                     content=content,
                     sending_agent=self.name,
                     requires_execution=True,
@@ -407,7 +411,6 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
             self._plan.put(SubTask(agent=agent, prompt=raw_content))
             serialized_plan = f"<steps><step1><agent>{agent.name}</agent><instruction>{raw_content}</instruction></step1></steps>"
             return AgentMessage(
-                role="assistant",
                 content=serialized_plan,
                 sending_agent=self.name,
             )

@@ -128,7 +128,6 @@ def parse_sql_response(
             input.database.remove_view(k)
         if input.can_reask_again:
             return AgentMessage(
-                role="assistant",
                 content=error_message + reask_suffix,
                 requires_response=True,
                 sending_agent=input.agent_name,
@@ -148,7 +147,6 @@ def parse_sql_response(
                     print("GIVING UP")
                     failure_content = content
             return AgentMessage(
-                role="assistant",
                 # Content is what gets fed to future models. All code relies on the
                 # parsing from this content.
                 content=content,
@@ -160,7 +158,6 @@ def parse_sql_response(
             )
 
     return AgentMessage(
-        role="assistant",
         content=content,
         display_content=f"SQL:\n{final_view_sql}",
         sending_agent=input.agent_name,
@@ -184,14 +181,12 @@ def parse_and_run_sql_for_debugger(
     if error_message:
         if input.can_reask_again:
             return AgentMessage(
-                role="assistant",
                 content=error_message,
                 sending_agent=input.agent_name,
                 requires_response=True,
             )
         else:
             return AgentMessage(
-                role="assistant",
                 # Content is what gets fed to future models. All code relies on the
                 # parsing from this content.
                 content=content,
@@ -210,7 +205,6 @@ def parse_and_run_sql_for_debugger(
             if df[col].dtype == "object":
                 df[col] = df[col].apply(lambda x: f"'{x}'")
     return AgentMessage(
-        role="assistant",
         content=f"SQL:\n{sql}\n\nTable:\n{df.head(100).to_csv(index=False, sep='|')}",
         sending_agent=input.agent_name,
     )
@@ -284,7 +278,6 @@ def check_empty_table(
     if error_message:
         if input.can_reask_again:
             return AgentMessage(
-                role="assistant",
                 content=error_message + reask_suffix,
                 requires_response=True,
                 sending_agent=input.agent_name,
@@ -307,7 +300,6 @@ def check_empty_table(
                     print("GIVING UP")
                     failure_content = content
             return AgentMessage(
-                role="assistant",
                 # Content is what gets fed to future models. All code relies on the
                 # parsing from this content.
                 content=content,
@@ -321,7 +313,6 @@ def check_empty_table(
     display_content += f"\n\nTable:\n{sql_df.head(10).to_string()}"
 
     return AgentMessage(
-        role="assistant",
         content=content,
         display_content=display_content,
         sending_agent=input.agent_name,

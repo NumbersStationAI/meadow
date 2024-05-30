@@ -3,8 +3,7 @@
 import time
 
 from meadow.agent.agent import Agent
-from meadow.agent.schema import AgentMessage
-from meadow.client.schema import Role
+from meadow.agent.schema import AgentMessage, ClientMessageRole
 
 
 def is_time_unique(
@@ -29,13 +28,17 @@ class MessageHistory:
         """Initialize the message history."""
         self._history: dict[Agent, list[AgentMessage]] = {}
 
-    def add_message(self, agent: Agent, role: Role, message: AgentMessage) -> None:
+    def add_message(
+        self, agent: Agent, agent_role: ClientMessageRole, message: AgentMessage
+    ) -> None:
         """Add a message to the message history."""
         if agent not in self._history:
             self._history[agent] = []
         # make a copy of the message to avoid modifying the original
         message = message.model_copy()
-        message.role = role
+        message.agent_role = agent_role
+        # Set the role of the message. This typically happens internally
+        message.role = agent_role.value
         message.creation_time = time.time()
         assert is_time_unique(self._history, message.creation_time)
         self._history[agent].append(message)
@@ -59,8 +62,8 @@ class MessageHistory:
             last_msg = history[0]
             for msg in history[1:]:
                 if (
-                    last_msg.role == "user"
-                    and msg.role == "assistant"
+                    last_msg.agent_role == ClientMessageRole.RECEIVER
+                    and msg.agent_role == ClientMessageRole.SENDER
                     and msg.is_termination_message
                 ):
                     history_to_drop.extend([last_msg_idx, last_msg_idx + 1])

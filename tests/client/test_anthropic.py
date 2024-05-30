@@ -44,7 +44,7 @@ def chat_completion() -> ToolsBetaMessage:
             ),
         ],
         model="claude-3-opus-20240229",
-        role="assistant",
+        role=ClientMessageRole.SENDER,
         stop_reason="max_tokens",
         stop_sequence=None,
         type="message",
@@ -128,7 +128,7 @@ def test_convert_anthropic_to_response(
                     index=0,
                     message=ChatMessage(
                         content='<thinking>\nThe user has directly provided a question to ask the query_gen tool:\n"How many cats do I have?"\n\nSince the query_gen tool takes a single required parameter "question" of type string, and the user has provided the question string, we have all the required information to call the tool.\n</thinking>',
-                        role="assistant",
+                        role=ClientMessageRole.SENDER,
                         tool_calls=[
                             ToolCall(
                                 unparsed_arguments='{"question": "How many cats do I have?"}',
@@ -177,7 +177,7 @@ def test_convert_anthropic_to_multi_messageresponse(
                     index=0,
                     message=ChatMessage(
                         content='<thinking>\nThe user has directly provided a question to ask the query_gen tool:\n"How many cats do I have?"\n\nSince the query_gen tool takes a single required parameter "question" of type string, and the user has provided the question string, we have all the required information to call the tool.\n</thinking>',
-                        role="assistant",
+                        role=ClientMessageRole.SENDER,
                         tool_calls=[
                             ToolCall(
                                 unparsed_arguments='{"question": "How many cats do I have?"}',
@@ -190,7 +190,7 @@ def test_convert_anthropic_to_multi_messageresponse(
                     index=1,
                     message=ChatMessage(
                         content="<thinking>I guess I should really get on this</thinking>",
-                        role="assistant",
+                        role=ClientMessageRole.SENDER,
                         tool_calls=[
                             ToolCall(
                                 unparsed_arguments='{"question": "Cats are dead to me?"}',
@@ -233,7 +233,7 @@ async def test_arun_chat(
                     index=0,
                     message=ChatMessage(
                         content='<thinking>\nThe user has directly provided a question to ask the query_gen tool:\n"How many cats do I have?"\n\nSince the query_gen tool takes a single required parameter "question" of type string, and the user has provided the question string, we have all the required information to call the tool.\n</thinking>',
-                        role="assistant",
+                        role=ClientMessageRole.SENDER,
                         tool_calls=[
                             ToolCall(
                                 unparsed_arguments='{"question": "How many cats do I have?"}',

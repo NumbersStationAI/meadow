@@ -40,7 +40,7 @@ def chat_completion() -> ChatCompletion:
                 logprobs=None,
                 message=ChatCompletionMessage(
                     content="This is a test.",
-                    role="assistant",
+                    role=ClientMessageRole.SENDER,
                     function_call=None,
                     tool_calls=None,
                 ),
@@ -66,7 +66,7 @@ def chat_tool_completion() -> ChatCompletion:
                 logprobs=None,
                 message=ChatCompletionMessage(
                     content=None,
-                    role="assistant",
+                    role=ClientMessageRole.SENDER,
                     function_call=None,
                     tool_calls=[
                         ChatCompletionMessageToolCall(
@@ -141,7 +141,9 @@ def test_convert_openai_to_response(
             MeadowChoice(
                 index=0,
                 message=ChatMessage(
-                    content="This is a test.", role="assistant", tool_calls=None
+                    content="This is a test.",
+                    role=ClientMessageRole.SENDER,
+                    tool_calls=None,
                 ),
             )
         ],
@@ -159,7 +161,7 @@ def test_convert_openai_to_response(
                 index=0,
                 message=ChatMessage(
                     content=None,
-                    role="assistant",
+                    role=ClientMessageRole.SENDER,
                     tool_calls=[
                         ToolCall(
                             unparsed_arguments='{"question":"What is the total revenue by product category for the year 2021?"}',
@@ -196,7 +198,9 @@ async def test_arun_chat(
             MeadowChoice(
                 index=0,
                 message=ChatMessage(
-                    content="This is a test.", role="assistant", tool_calls=None
+                    content="This is a test.",
+                    role=ClientMessageRole.SENDER,
+                    tool_calls=None,
                 ),
             )
         ],
