@@ -7,7 +7,7 @@ from typing import Callable
 
 from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
 from meadow.agent.executor.reask import ReaskExecutor
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, ExecutorFunctionInput
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -40,15 +40,14 @@ Output the remapping in JSON in the following format:
 }
 ```"""
 
+DEFAULT_RENAME_DESC = "This agent renames columns to be more standard and useful for determining the right attributes and detecting joins. Most schemas need some cleaning unless the attributes are already very clear. The input instruction should be the phrase 'clean schema'. Do not pass the output of this agent to any other agent. Generate fresh instructions for future agents in the plan."
+
 
 def parse_rename_and_update_db(
-    messages: list[AgentMessage],
-    agent_name: str,
-    database: Database,
-    can_reask_again: bool,
+    input: ExecutorFunctionInput,
 ) -> AgentMessage:
     """Parse the message and update the database."""
-    content = messages[-1].content
+    content = input.messages[-1].content
     error_message: str = None
     try:
         if "```json" in content:
@@ -76,14 +75,16 @@ def parse_rename_and_update_db(
         for table_name, column_mapping in content.items():
             if any(k != v for k, v in column_mapping.items()):
                 try:
-                    database.add_base_table_column_remap(table_name, column_mapping)
+                    input.database.add_base_table_column_remap(
+                        table_name, column_mapping
+                    )
                 except Exception as e:
                     error_message = f"Error adding the column remapping for table {table_name}.\n{e}"
                     break
 
     # Make sure FKs match
     if not error_message:
-        table_as_dict = {tbl.name: tbl for tbl in database.tables}
+        table_as_dict = {tbl.name: tbl for tbl in input.database.tables}
         non_match_pairs = get_non_matching_fks(table_as_dict)
         if non_match_pairs:
             error_message = (
@@ -92,18 +93,18 @@ def parse_rename_and_update_db(
             )
 
     if error_message:
-        database.remove_base_table_remaps()
+        input.database.remove_base_table_remaps()
         return AgentMessage(
             role="assistant",
             content=error_message + " Please regenerate mapping and try again.",
             requires_response=True,
-            sending_agent=agent_name,
+            sending_agent=input.agent_name,
         )
 
     return AgentMessage(
         role="assistant",
         content="The schema has been updated.",
-        sending_agent=agent_name,
+        sending_agent=input.agent_name,
     )
 
 
@@ -116,6 +117,8 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
         llm_config: LLMConfig,
         database: Database,
         executors: list[ExecutorAgent] = None,
+        name: str = "SchemaRenamer",
+        description: str = DEFAULT_RENAME_DESC,
         system_prompt: str = DEFAULT_RENAME_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -124,13 +127,12 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
         """Initialize the SQL generator agent."""
         self._client = client
         self._llm_config = llm_config
-        # if system_prompt == DEFAULT_RENAME_PROMPT:
-        #     # Response format should be a JSON object for the output
         self._llm_config = self._llm_config.model_copy()
         self._llm_config.max_tokens = 2000
-        # self._llm_config.response_format = {"type": "json_object"}
         self._database = database
         self._executors = executors
+        self._name = name
+        self._description = description
         self._system_prompt = system_prompt
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
@@ -152,13 +154,12 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "SchemaRenamer"
+        return self._name
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "This agent renames columns to be more standard and useful for determining the right attributes and detecting joins. Most schemas need some cleaning unless the attributes are already very clear. The input instruction should be the phrase 'clean schema'. Do not pass the output of this agent to any other agent. Generate fresh instructions for future agents in the plan."
-        # return "Always use this agent first before any other agent to clean the schema. It must be used in all plans. The instruction should be <instruction>clean schema</instruction>. Do not pass the output of this agent to any other agent. Generate fresh instructions for next agents."
+        return self._description
 
     @property
     def llm_client(self) -> Client:
@@ -193,7 +194,6 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
     ) -> None:
         """Send a message to another agent."""
         if not message:
-            logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)

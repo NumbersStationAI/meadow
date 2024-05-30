@@ -9,11 +9,13 @@ from meadow.agent.agent import (
     ExecutorAgent,
     LLMAgentWithExecutors,
 )
-from meadow.agent.executor.contrib.empty_result_debugger import EmptyResultExecutor
-from meadow.agent.executor.contrib.sql_validate_reask import (
+from meadow.agent.executor.data_executors.empty_result_debugger import (
+    EmptyResultExecutor,
+)
+from meadow.agent.executor.data_executors.sql_validate_reask import (
     SQLValidateExecutor,
 )
-from meadow.agent.schema import AgentMessage, Commands
+from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -26,16 +28,6 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-# DEFAULT_SQL_PROMPT = """You generate SQLite SQL queries and are a SQLite expert. Given the table schema and user's question, generate a SQLite SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
-
-# 1. Feel free to think through what you need to do first.
-# 2. Use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
-# 3. Then <description></description> tags for a one sentence description of what the SQL query captures. Be concise.
-# 4. Please use `FROM sqlXXX` to refer to the SQL query number XXX in the prompt. For example, if sql2 is in the schema from a prior step, please use `FROM sql2` to refer to that query.
-
-# The user's schema is:
-# {schema}"""
-
 DEFAULT_SQL_PROMPT = """You generate SQLite SQL queries and are a SQLite expert. Given the table schema and user's question, generate a SQLite SQL query that answers the user's question and a one sentence description of the generated SQL query. Follow these rules:
 
 1. First use <sql></sql> tags or ```sql...``` for the SQL. Please refer to views and base tables in the SQL if necessary.
@@ -43,6 +35,8 @@ DEFAULT_SQL_PROMPT = """You generate SQLite SQL queries and are a SQLite expert.
 
 The user's schema is:
 {schema}"""
+
+DEFAULT_SQL_DESC = "Generates a single SQL query based on the given user instruction. Each instruction should clearly describe what question is to be asked and what attributes the user wants."
 
 
 class SQLGeneratorAgent(LLMAgentWithExecutors):
@@ -54,6 +48,8 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         llm_config: LLMConfig,
         database: Database,
         executors: list[ExecutorAgent] = None,
+        name: str = "SQLGenerator",
+        description: str = DEFAULT_SQL_DESC,
         system_prompt: str = DEFAULT_SQL_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -64,6 +60,8 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         self._llm_config = llm_config
         self._database = database
         self._executors = executors
+        self._name = name
+        self._description = description
         self._system_prompt = system_prompt
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
@@ -90,15 +88,12 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "SQLGenerator"
+        return self._name
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        # return "Generates a single SQL query based on the given user instruction. Each instruction should be a detailed description of what attributes, aggregates, filter conditions, tables, and joins are needed in the SQL query along with any custom functions that are needed (e.g. ROW_NUMBER, RANK, LAG, ...)."
-        # return "Generates a single SQL query based on the given user instruction. For queries requiring joins and at most one CTE, this agent is the optimal one to use. If the query requires more than one CTE, consider using the MultiCTESQLGenerator agent."
-        # return "This agent is an intermediate SQL generator that outputs SQL queries to answer user questions. This agent can handle SQL queries that involve multiple tables and joins but it is at an intermediate level.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a SQL query that answers the question or instruction."
-        return "Generates a single SQL query based on the given user instruction. Each instruction should clearly describe what question is to be asked and what attributes the user wants."
+        return self._description
 
     @property
     def llm_client(self) -> Client:
@@ -116,8 +111,6 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         serialized_schema = serialize_as_list(self.database.tables)
         return self._system_prompt.format(
             schema=serialized_schema,
-            termination_message=Commands.END,
-            dialect="SQLite",
         )
 
     def set_chat_role(self, role: AgentRole) -> None:
@@ -138,7 +131,6 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
     ) -> None:
         """Send a message to another agent."""
         if not message:
-            logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)
@@ -169,6 +161,10 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply when Executor agent."""
+        # If the SQL generator is called multiple times, we want to start
+        # from the last new SQL command and ignore previous SQL queries.
+        # But, we want to keep any feedback messages from validators or the user
+        # So, we keep messages in pairs that require respnose (from validator)
         messages_start_idx = -1
         while (
             abs(messages_start_idx) <= len(messages)

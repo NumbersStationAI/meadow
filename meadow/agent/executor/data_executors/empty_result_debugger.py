@@ -29,6 +29,10 @@ Input: ```Input to action in quotes```
 
 Your final goal is to edit the SQL to be correct or do nothing. Often, a good first step is to Query with 'SELECT <relevant_attributes> FROM <table> LIMIT 100' without a filter to see all the values and attributes in the table. If the query has a lot of CTEs, you may need to start debugging them one at a time."""
 
+DEFAULT_EMPTYRESULT_DESC = (
+    "Debugs why a table result is empty by querying and exploring the database."
+)
+
 
 class EmptyResultExecutor(DebuggerExecutor):
     """Debugger executor specifically for empty tables."""
@@ -39,6 +43,7 @@ class EmptyResultExecutor(DebuggerExecutor):
         llm_config: LLMConfig,
         database: Database,
         max_execution_attempts: int = 2,
+        description: str = DEFAULT_EMPTYRESULT_DESC,
         system_prompt: str = DEFAULT_EMPTYRESULT_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -51,6 +56,7 @@ class EmptyResultExecutor(DebuggerExecutor):
             database=database,
             max_execution_attempts=max_execution_attempts,
             execution_func=check_empty_table,
+            description=description,
             system_prompt=system_prompt,
             overwrite_cache=overwrite_cache,
             silent=silent,

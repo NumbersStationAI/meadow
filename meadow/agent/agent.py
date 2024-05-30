@@ -1,17 +1,8 @@
-import enum
 from abc import abstractmethod
 from typing import Callable
 
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, AgentRole, ExecutorFunctionInput
 from meadow.client.client import Client
-from meadow.database.database import Database
-
-
-class AgentRole(enum.Enum):
-    """Agent role."""
-
-    SUPERVISOR = enum.auto()
-    EXECUTOR = enum.auto()
 
 
 class Agent:
@@ -26,8 +17,7 @@ class Agent:
     @property
     @abstractmethod
     def description(self) -> str:
-        """The description of the agent. Used for the agent's introduction in
-        a group chat setting."""
+        """The description of the agent. Used in planners."""
         ...
 
     @property
@@ -129,7 +119,7 @@ class ExecutorAgent(LLMAgent):
     @abstractmethod
     def execution_func(
         self,
-    ) -> Callable[[list[AgentMessage], str, Database, bool], AgentMessage]:
+    ) -> Callable[[ExecutorFunctionInput], AgentMessage]:
         """The execution function of this agent."""
         ...
 

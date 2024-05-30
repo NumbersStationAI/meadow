@@ -27,24 +27,7 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-
-DEFAULT_SQL_DECOMP_INST_PROMPT = """The user wants to answer an analytics question in SQL.
-
-Based on the following question provided by the user, please make a plan consisting of a minimal sequence of SQL-queries using SQL Generator agent. The SQL Generator generates a single SQL query based on the given user instructions.
-
-For each SQL in the sequence, generate a text instruction for the SQL Generator to follow. To reference a past step (e.g. to reference step 2, please use the phrase `sql2` in the instruction). When generating a plan, please use the following tag format to specify the plan.
-
-<instruction1>...</instruction1>
-<instruction2>...</instruction2>
-...
-
-Below is the data schema the user is working with.
-{serialized_schema}
-
-Please keep the plan simple and use as few steps as possible. The last instruction should specifically say what the final attributes are. The last instruction tag should end with a sentence starting with "The final attributes should be"... and then provide the attributes."""
-
-
-DEFAULT_SQL_DECOMP_NUM_PROMPT = """Below is the data schema the user is working with.
+DEFAULT_SQL_PROMPT = """Below is the data schema the user is working with.
 
 {serialized_schema}
 
@@ -62,19 +45,6 @@ class SubTaskForParse(BaseModel):
 
     agent_name: str
     prompt: str
-
-
-def parse_steps_instructions(input_str: str) -> list[tuple[str, str]]:
-    """
-    Parse the given XML-like string and extract instruction using regular expressions.
-    """
-    # Use '.*' after last instruction because sometimes it'll add extra pieces we don't care about
-    pattern = re.compile(
-        r"<instruction\d*>(.*?)</instruction\d*>",
-        re.DOTALL,
-    )
-    matches = pattern.findall(input_str)
-    return [instruction.strip() for instruction in matches]
 
 
 def parse_steps_numbers(input_str: str) -> list[str]:
@@ -102,13 +72,6 @@ def parse_steps_numbers(input_str: str) -> list[str]:
             continue
         except Exception:
             pass
-        # Remove the ```sql``` blocks
-        # piece_without_sql = re.sub(r"```sql(.*?)```", "", piece, flags=re.DOTALL)
-        # piece_without_sql = re.sub(r"\s+", " ", piece_without_sql)
-        # if piece_without_sql:
-        #     number = int(re.match(r"(\d+)\.", piece_without_sql.strip()).group(1))
-        #     instructions[number] = piece_without_sql.strip()
-        # else:
         assert cur_num is not None
         instructions[cur_num] = piece.strip().replace("**", "")
     return [instructions[i] for i in sorted(instructions.keys())]
@@ -120,10 +83,7 @@ def parse_plan(
     agent_to_use: str = "SQLGenerator",
 ) -> AgentMessage:
     """Extract the plan from the response."""
-    if "<instruction" in message:
-        parsed_steps = parse_steps_instructions(message)
-    else:
-        parsed_steps = parse_steps_numbers(message)
+    parsed_steps = parse_steps_numbers(message)
     plan: list[SubTaskForParse] = []
     for instruction in parsed_steps:
         plan.append(SubTaskForParse(agent_name=agent_to_use, prompt=instruction))
@@ -146,7 +106,7 @@ class SQLDecomposerAgent(LLMPlannerAgent):
         llm_config: LLMConfig | None,
         database: Database | None,
         available_agents: list[Agent] = None,
-        system_prompt: str = DEFAULT_SQL_DECOMP_INST_PROMPT,
+        system_prompt: str = DEFAULT_SQL_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -175,13 +135,12 @@ class SQLDecomposerAgent(LLMPlannerAgent):
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "MultiCTESQLGenerator"
+        return "SQLDecomposer"
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "For heavily complex SQL queries that require multiple CTE expression, this agent decomposes the task into simpler sub queries that get joined together. This agent should be used instead of the simple SQLGenerator if the question is heavily complex."
-        # return "This agent takes as input a very complex user questions that often require numerous nested reasoning steps and outputs a SQL query to answer it. This agent should only be used if other SQL agents are not good enough and can't handle the complexity for the question.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a of SQL queries that answers the original user question."
+        return "This agent takes as input a very complex user questions that often require numerous nested reasoning steps and outputs a SQL query to answer it. This agent should only be used if other SQL agents are not good enough and can't handle the complexity for the question.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a of SQL queries that answers the original user question."
 
     @property
     def llm_client(self) -> Client:

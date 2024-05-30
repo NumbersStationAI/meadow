@@ -4,7 +4,7 @@ import logging
 from typing import Callable
 
 from meadow.agent.agent import Agent, LLMAgent
-from meadow.agent.schema import AgentMessage, Commands
+from meadow.agent.schema import AgentMessage
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -41,6 +41,9 @@ Attributes: AVG(employment.salary), companies.name
 Now output an explanation followed by the attributes the user wants to see for the following question:"""
 
 
+DEFAULT_ATTRIBUTE_DESC = "Augments the user question with desired attributes and outputs a new question to be used to generate the answer. The instruction to this agent should be a copy of the user question. The output of this agent should always be used downstream. Make the entire instruction be {stepXX} when using this agent's output."
+
+
 class AttributeDetectorAgent(LLMAgent):
     """Agent that generates SQL queries from user questions."""
 
@@ -49,6 +52,8 @@ class AttributeDetectorAgent(LLMAgent):
         client: Client,
         llm_config: LLMConfig,
         database: Database,
+        name: str = "AttributeDetector",
+        description: str = DEFAULT_ATTRIBUTE_DESC,
         system_prompt: str = DEFAULT_ATTRIBUTE_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -58,6 +63,8 @@ class AttributeDetectorAgent(LLMAgent):
         self._client = client
         self._llm_config = llm_config
         self._database = database
+        self._name = name
+        self._description = description
         self._system_prompt = system_prompt
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
@@ -67,12 +74,12 @@ class AttributeDetectorAgent(LLMAgent):
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "AttributeDetector"
+        return self._name
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "Augments the user question with desired attributes and outputs a new question to be used to generate the answer. The instruction to this agent should be a copy of the user question. The output of this agent should always be used downstream. Make the entire instruction be {stepXX} when using this agent's output."
+        return self._description
 
     @property
     def llm_client(self) -> Client:
@@ -90,8 +97,6 @@ class AttributeDetectorAgent(LLMAgent):
         serialized_schema = serialize_as_list(self.database.tables)
         return self._system_prompt.format(
             schema=serialized_schema,
-            termination_message=Commands.END,
-            dialect="SQLite",
         )
 
     async def send(
@@ -101,7 +106,6 @@ class AttributeDetectorAgent(LLMAgent):
     ) -> None:
         """Send a message to another agent."""
         if not message:
-            logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)

@@ -1,5 +1,6 @@
 """Planner agent."""
 
+from functools import partial
 import json
 import logging
 import re
@@ -10,10 +11,13 @@ from pydantic import BaseModel
 
 from meadow.agent.agent import (
     Agent,
+    ExecutorAgent,
+    LLMAgentWithExecutors,
     LLMPlannerAgent,
     SubTask,
 )
-from meadow.agent.schema import AgentMessage, Commands
+from meadow.agent.executor.reask import ReaskExecutor
+from meadow.agent.schema import AgentMessage, AgentRole, Commands, ExecutorFunctionInput
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -25,32 +29,6 @@ from meadow.database.serializer import serialize_as_list
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
-
-# DEFAULT_PLANNER_PROMPT = """Below is the data schema the user is working with.
-# {serialized_schema}
-
-# Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
-
-# For each sub-step in the sequence, indicate which agents should perform the task and generate a detailed instruction for the agent to follow. If you want to refer to a previous step, use 'stepXX'. If you want the output from a previous step to be used in the input, please use {{stepXX}} in the instruction to use the last output from stepXX. When generating a plan, please use the following tag format to specify the plan.
-
-# <steps>
-# <step1>
-# <agent>...</agent>
-# <instruction>...</instruction>
-# </step1>
-# <step2>
-# ...
-# </step2>
-# ...
-# </steps>
-
-# You have access to the following agents.
-
-# <agents>
-# {agents}
-# </agents>
-
-# Out a single plan."""
 
 DEFAULT_PLANNER_PROMPT = """Based on the following objective provided by the user, please break down the objective into a sequence of sub-steps that one or more agents can solve.
 
@@ -127,8 +105,7 @@ def parse_steps(input_str: str) -> list[tuple[str, str]]:
 
 
 def parse_plan(
-    message: str,
-    agent_name: str,
+    input: ExecutorFunctionInput,
     available_agents: dict[str, Agent],
 ) -> AgentMessage:
     """Extract the plan from the response.
@@ -142,73 +119,71 @@ def parse_plan(
     ...
     </steps>.
     """
+    error_message = None
+    message = input.messages[-1].content
     if message.endswith("</steps"):
         message += ">"
     if "<steps>" not in message:
-        raise ValueError(f"Plan not found in the response. message={message}")
-    inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
-    parsed_steps = parse_steps(inner_steps)
-    plan: list[SubTaskForParse] = []
-    for agent, instruction in parsed_steps:
-        if agent not in available_agents:
-            raise ValueError(
-                f"Agent {agent} not found in available agents. Please only use {', '.join(available_agents.keys())}"
-            )
-        if agent == "AttributeDetector" and "{" in instruction:
-            raise ValueError(
-                f"AttributeDetector agent cannot have any replacement tags in the instruction. instruction={instruction}"
-            )
-        # if agent in {"SQLGenerator", "NestedSQLGenerator"} and "{" in instruction:
-        #     copied_plan = [p.model_copy() for p in plan] + [
-        #         SubTaskForParse(agent_name=agent, prompt=instruction)
-        #     ]
-        #     fake_plan = swap_instruction_replacements_with_agent_names(copied_plan)
-        #     if "SQLGenerator" or "NestedSQLGenerator" in [
-        #         p.agent_name for p in fake_plan
-        #     ]:
-        #         raise ValueError(
-        #             "SQLGenerator cannot take as input the output of another SQLGenerator or NestedSQLGenerator agent. If you wish to refer to their previous steps, please just say 'stepXX'"
-        #         )
+        error_message = "Plan not found in the response. Please provide a plan in the format <steps>...</steps>."
+    if not error_message:
+        inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
+        parsed_steps = parse_steps(inner_steps)
+        plan: list[SubTaskForParse] = []
+        # TODO: how to craft better planner rules?
+        for agent, instruction in parsed_steps:
+            if agent not in available_agents:
+                error_message = f"Agent {agent} not found in available agents. Please only use {', '.join(available_agents.keys())}."
+            if not error_message and (
+                agent == "AttributeDetector" and "{" in instruction
+            ):
+                error_message = f"AttributeDetector agent cannot have any replacement tags in the instruction. instruction={instruction}."
+            if not error_message and (
+                agent == "SQLGenerator"
+                and "SQLGenerator" in [p.agent_name for p in plan]
+            ):
+                error_message = "SQLGenerator agent can only be used once. Please rewrite to just have a single <agent>SQLGenerator</agent> in the plan."
+            if not error_message:
+                plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
 
-        if agent == "NestedSQLGenerator" and "NestedSQLGenerator" in [
-            p.agent_name for p in plan
-        ]:
-            raise ValueError(
-                "Only one NestedSQLGenerator agent can be used in a plan without any SQLGenerator agents. "
-                "This agent decomposes the question for you."
-            )
-        if agent == "SQLGenerator" and "NestedSQLGenerator" in [
-            p.agent_name for p in plan
-        ]:
-            raise ValueError(
-                "SQLGenerator agent cannot be used in a plan with a NestedSQLGenerator agent. "
-                "Just use one NestedSQLGenerator agent to decompose the question."
-            )
-        if agent == "SQLGenerator" and "SQLGenerator" in [p.agent_name for p in plan]:
-            raise ValueError(
-                "SQLGenerator agent can only be used once. Please rewrite to just have a single <agent>SQLGenerator</agent> in the plan."
-            )
-        plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
+        if not error_message:
+            for i, p in enumerate(plan):
+                if p.agent_name == "SQLPlanner" and not any(
+                    f"{{step{i + 1}}}" in p.prompt for p in plan
+                ):
+                    error_message = f"SQLPlanner agent's output must be used in a future step, but it is not. Please either remove the SQLPlanner or use it's output via {{step{i + 1}}}."
 
-    for i, p in enumerate(plan):
-        if p.agent_name == "SQLPlanner" and not any(
-            f"{{step{i + 1}}}" in p.prompt for p in plan
-        ):
-            raise ValueError(
-                f"SQLPlanner agent's output must be used in a future step, but it is not. Please either remove the SQLPlanner or use it's output via {{step{i + 1}}}."
+        if not error_message:
+            try:
+                plan = swap_instruction_replacements_with_agent_names(plan)
+            except Exception as e:
+                error_message = (
+                    f"Error swapping instruction replacements with agent names. e={e}"
+                )
+
+    if error_message:
+        if input.can_reask_again:
+            return AgentMessage(
+                role="assistant",
+                content=error_message.strip() + " Please retry.",
+                requires_response=True,
+                sending_agent=input.agent_name,
+            )
+        else:
+            return AgentMessage(
+                role="assistant",
+                content=f"Current plan.\n\n{message}\n\nWe're having trouble generating a plan. Please try to rephrase.",
+                sending_agent=input.agent_name,
             )
 
     return AgentMessage(
         role="assistant",
         content=json.dumps([m.model_dump() for m in plan]),
         display_content=inner_steps,
-        tool_calls=None,
-        sending_agent=agent_name,
-        requires_response=False,
+        sending_agent=input.agent_name,
     )
 
 
-class PlannerAgent(LLMPlannerAgent):
+class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
     """Agent that generates a plan for a task."""
 
     def __init__(
@@ -217,6 +192,9 @@ class PlannerAgent(LLMPlannerAgent):
         client: Client | None,
         llm_config: LLMConfig | None,
         database: Database | None,
+        executors: list[ExecutorAgent] = None,
+        name: str = "Planner",
+        description: str = "Generates a plan for a task.",
         system_prompt: str = DEFAULT_PLANNER_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -227,22 +205,39 @@ class PlannerAgent(LLMPlannerAgent):
         self._client = client
         self._llm_config = llm_config
         self._database = database
+        self._executors = executors
+        self._name = name
+        self._description = description
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
+        self._role = AgentRole.EXECUTOR
         self._plan: Queue[SubTask] = Queue()
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
 
+        if self._executors is None:
+            self._executors = [
+                ReaskExecutor(
+                    client=None,
+                    llm_config=None,
+                    database=self._database,
+                    execution_func=partial(
+                        parse_plan, available_agents=self._available_agents
+                    ),
+                    llm_callback=self._llm_callback,
+                )
+            ]
+
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "Planner"
+        return self._name
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "Plans the task."
+        return self._description
 
     @property
     def llm_client(self) -> Client:
@@ -266,6 +261,15 @@ class PlannerAgent(LLMPlannerAgent):
                 ]
             ),
         )
+
+    def set_chat_role(self, role: AgentRole) -> None:
+        """Set the chat role of the agent."""
+        self._role = role
+
+    @property
+    def executors(self) -> list[ExecutorAgent] | None:
+        """The executor agents that should be used by this agent."""
+        return self._executors
 
     @property
     def available_agents(self) -> dict[str, Agent]:
@@ -292,7 +296,6 @@ class PlannerAgent(LLMPlannerAgent):
     ) -> None:
         """Send a message to another agent."""
         if not message:
-            logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)
@@ -346,80 +349,51 @@ class PlannerAgent(LLMPlannerAgent):
                 return AgentMessage(
                     role="assistant",
                     content=content,
-                    tool_calls=None,
                     sending_agent=self.name,
                     is_termination_message=True,
                 )
             else:
-                display_content = None
-                # TODO: refactor using executors
-                messages_copy = messages
-                attempt_i = 0
-                while attempt_i <= 2:
-                    attempt_i += 1
-                    try:
-                        parsed_plan_message = parse_plan(
-                            content,
-                            self.name,
-                            self._available_agents,
-                        )
-                        break
-                    except Exception as e:
-                        print(e)
-                        # Do one LLM reask
-                        messages_copy = [m.model_copy() for m in messages_copy]
-                        messages_copy.append(
+                self._plan = Queue()
+                # parse_plan will check and rethrow any errors in the executor phase. However, we
+                # need to update the planner state with the output of the parse_plan function.
+                # So we call it here as well. If there's an error, that's okay, but planner
+                # agent will get recalled by the validator to fix it.
+                parsed_plan_message = parse_plan(
+                    input=ExecutorFunctionInput(
+                        messages=[
                             AgentMessage(
                                 role="assistant",
                                 content=content,
                                 sending_agent=self.name,
                             )
-                        )
-                        messages_copy.append(
-                            AgentMessage(
-                                role="user",
-                                content=(str(e) + " Please retry."),
-                                sending_agent="User",
+                        ],
+                        agent_name=self.name,
+                        database=self._database,
+                        can_reask_again=True,
+                    ),
+                    available_agents=self._available_agents,
+                )
+                try:
+                    parsed_plan = [
+                        SubTaskForParse(**m)
+                        for m in json.loads(parsed_plan_message.content)
+                    ]
+                    for sub_task in parsed_plan:
+                        print(sub_task.agent_name, "---", sub_task.prompt)
+                        self._plan.put(
+                            SubTask(
+                                agent=self._available_agents[sub_task.agent_name],
+                                prompt=sub_task.prompt,
                             )
                         )
-                        chat_response = await generate_llm_reply(
-                            client=self.llm_client,
-                            messages=messages_copy,
-                            tools=[],
-                            system_message=AgentMessage(
-                                role="system",
-                                content=self.system_message,
-                                sending_agent=self.name,
-                            ),
-                            llm_config=self._llm_config,
-                            llm_callback=self._llm_callback,
-                            overwrite_cache=self._overwrite_cache,
-                        )
-                        content = chat_response.choices[0].message.content
-                        print("CONTENT PLANNER REDO", content)
-                        print("*****")
-
-                display_content = parsed_plan_message.display_content
-                parsed_plan = [
-                    SubTaskForParse(**m)
-                    for m in json.loads(parsed_plan_message.content)
-                ]
-                # Handle agent name swaps
-                parsed_plan = swap_instruction_replacements_with_agent_names(
-                    parsed_plan
-                )
-                for sub_task in parsed_plan:
-                    self._plan.put(
-                        SubTask(
-                            agent=self._available_agents[sub_task.agent_name],
-                            prompt=sub_task.prompt,
-                        )
-                    )
+                except Exception as e:
+                    logger.warning(f"Error in planner. e={e}")
+                    pass
                 return AgentMessage(
                     role="assistant",
                     content=content,
-                    display_content=display_content,
                     sending_agent=self.name,
+                    requires_execution=True,
                 )
         else:
             if len(self._available_agents) > 1:
