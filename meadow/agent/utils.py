@@ -59,9 +59,6 @@ async def generate_llm_reply(
     """Generate a reply using autogen.oai."""
     serialized_messages = [system_message.model_dump(include={"role", "content"})]
     serialized_messages += [m.model_dump(include={"role", "content"}) for m in messages]
-    # for msg in serialized_messages[1:]:
-    #     print(msg["role"], "-----", msg["content"])
-    # print("*********")
     chat_response = await client.chat(
         messages=serialized_messages,
         tools=tools if tools else None,
@@ -74,11 +71,4 @@ async def generate_llm_reply(
     )
     if llm_callback:
         llm_callback(serialized_messages, chat_response)
-    # logger.info(
-    #     "Ran model",
-    #     prompts=serialized_messages,
-    #     response=chat_response.choices[0].message,
-    #     tools=serialized_tools,
-    #     config=self._llm_config,
-    # )
     return chat_response

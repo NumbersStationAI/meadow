@@ -1,5 +1,6 @@
 """Executor agent."""
 
+import copy
 import logging
 from typing import Callable
 
@@ -11,7 +12,7 @@ from meadow.agent.data_agents.text2sql_utils import (
     parse_sql_response,
 )
 from meadow.agent.executor.reask import ReaskExecutor
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, ExecutorFunctionInput
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -42,6 +43,11 @@ Input: ```Input to action in quotes```
 At each point in the conversation, you must provide exaction one action you want to take. The user will provide the response and you two will collectively iterate on the issue until it is resolved. Your final goal is to edit the SQL to be correct or do nothing. If you would like, using <thinking> tags to plan the action to take before outputting the <step> tags."""
 
 
+DEFAULT_DEBUGGER_DESC = (
+    "Executes responses and asks models why there are mistakes and how to fix."
+)
+
+
 def parse_plan(
     message: str,
 ) -> tuple[str, str]:
@@ -70,54 +76,57 @@ def parse_plan(
 
 
 def parse_plan_and_take_action(
-    messages: list[AgentMessage],
-    agent_name: str,
-    database: Database,  # required for use in an executor
-    can_reask_again: bool,
+    input: ExecutorFunctionInput,
 ) -> AgentMessage:
     """Parse generated plan and take associated action.
 
     E.g. parse a SQL query and run it.
     """
-    content = messages[-1].content
+    content = input.messages[-1].content
     try:
-        action, input = parse_plan(content)
+        action, input_inst = parse_plan(content)
     except ValueError as e:
-        assert can_reask_again, "TODO: Handle this case."
+        assert input.can_reask_again, "TODO: Handle this case."
         return AgentMessage(
             role="assistant",
             content=f"Error parsing the plan.\n{e}",
             requires_response=True,
-            sending_agent=agent_name,
+            sending_agent=input.agent_name,
         )
     if action == "Edit":
         message = AgentMessage(
-            role="assistant", content=f"<sql>\n{input}</sql>", sending_agent=agent_name
+            role="assistant",
+            content=f"<sql>\n{input_inst}</sql>",
+            sending_agent=input.agent_name,
         )
         # Remove now stale view
-        view_name = f"sql{database.get_number_of_views()}"
-        database.remove_view(view_name)
-        return parse_sql_response([message], agent_name, database, can_reask_again)
+        view_name = f"sql{input.database.get_number_of_views()}"
+        input.database.remove_view(view_name)
+
+        input_copy = copy.copy(input)
+        input_copy.messages = [message]
+        return parse_sql_response(input_copy)
     elif action == "Query":
         message = AgentMessage(
-            role="assistant", content=f"{input}", sending_agent=agent_name
+            role="assistant", content=f"{input_inst}", sending_agent=input.agent_name
         )
-        response = parse_and_run_sql_for_debugger(
-            [message], agent_name, database, can_reask_again
-        )
+
+        input_copy = copy.copy(input)
+        input_copy.messages = [message]
+        response = parse_and_run_sql_for_debugger(input_copy)
         # We know that a "Query" message requires a response from this agent
         # as the query it help debug
         response.requires_response = True
         return response
     else:
         # Get the view in question as it exists in the DB
-        view_name = f"sql{database.get_number_of_views()}"
-        sql = database.get_table(view_name).view_sql
+        view_name = f"sql{input.database.get_number_of_views()}"
+        sql = input.database.get_table(view_name).view_sql
         return AgentMessage(
             role="assistant",
             content=f"<sql>\n{sql}</sql>",
             display_content=f"SQL:\n{sql}",
-            sending_agent=agent_name,
+            sending_agent=input.agent_name,
         )
 
 
@@ -129,11 +138,10 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         client: Client,
         llm_config: LLMConfig,
         database: Database,
-        execution_func: Callable[
-            [list[AgentMessage], str, Database, bool], AgentMessage
-        ],
+        execution_func: Callable[[ExecutorFunctionInput], AgentMessage],
         max_execution_attempts: int = 2,
         executors: list[ExecutorAgent] = None,
+        description: str = DEFAULT_DEBUGGER_DESC,
         system_prompt: str = DEFAULT_DEBUGGER_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -147,6 +155,7 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         self._max_execution_attempts = max_execution_attempts
         self._current_execution_attempts = 0
         self._executors = executors
+        self._description = description
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
         self._overwrite_cache = overwrite_cache
@@ -175,14 +184,12 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return self.__class__.__name__
+        return f"{self._execution_func.__name__}_Debugger_Executor"
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return (
-            "Executes responses and asks models why there are mistakes and how to fix."
-        )
+        return self._description
 
     @property
     def role(self) -> AgentRole:
@@ -192,7 +199,7 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
     @property
     def execution_func(
         self,
-    ) -> Callable[[list[AgentMessage], str, Database, bool], AgentMessage]:
+    ) -> Callable[[ExecutorFunctionInput], AgentMessage]:
         """The execution function of this agent."""
         return self._execution_func
 
@@ -228,7 +235,6 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
     ) -> None:
         """Send a message to another agent."""
         if not message:
-            logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)
@@ -270,12 +276,13 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         can_reask_again = (
             self._current_execution_attempts < self._max_execution_attempts
         )
-        parsed_response = self.execution_func(
-            messages,
-            self.name,
-            self._database,
-            can_reask_again,
+        execution_func_input = ExecutorFunctionInput(
+            messages=messages,
+            agent_name=self.name,
+            database=self._database,
+            can_reask_again=can_reask_again,
         )
+        parsed_response = self.execution_func(execution_func_input)
         if parsed_response.requires_response:
             # Adding the data to the schema for the debugger makes it often think it's seeing the entire table
             # and make mistakes wrt filters. Better to leave the data out.
@@ -301,7 +308,6 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         sender: Agent,
     ) -> AgentMessage:
         """Generate the reply when acting as an Agent of a chat."""
-        # Use display content instead of content for agent chats for user
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,

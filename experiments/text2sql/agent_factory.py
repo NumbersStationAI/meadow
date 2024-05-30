@@ -9,8 +9,8 @@ from meadow.agent.data_agents.schema_renamer import SchemaRenamerAgent
 from meadow.agent.data_agents.sql_decomposer import SQLDecomposerAgent
 from meadow.agent.data_agents.sql_planner import SQLPlannerAgent
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
-from meadow.agent.executor.contrib.empty_result_debugger import EmptyResultExecutor
-from meadow.agent.executor.contrib.sql_validate_reask import SQLValidateExecutor
+from meadow.agent.executor.data_executors.empty_result_debugger import EmptyResultExecutor
+from meadow.agent.executor.data_executors.sql_validate_reask import SQLValidateExecutor
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
 from meadow.client.client import Client

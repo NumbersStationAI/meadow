@@ -54,6 +54,9 @@ If the question is 'Find the top two companies by the number employees over the 
 The final attributes should be companies.name."""
 
 
+DEFAULT_SQL_PLAN_DESC = """This agent is expensive and takes as input a complex user question that often require numerous nested reasoning steps and outputs a plan to answer it. This agent should only be used sparingly for complex questions that have multiple steps and nested logic. The output of this agent **must** be used as input to another agent via {stepXX} tags.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a detailed plan for how to answer the SQL."""
+
+
 class SQLPlannerAgent(LLMAgent):
     """Agent that generates a plan for subsql tasks."""
 
@@ -62,6 +65,8 @@ class SQLPlannerAgent(LLMAgent):
         client: Client | None,
         llm_config: LLMConfig | None,
         database: Database | None,
+        name: str = "SQLPlanner",
+        description: str = DEFAULT_SQL_PLAN_DESC,
         system_prompt: str = DEFAULT_SQL_PLAN_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -72,6 +77,8 @@ class SQLPlannerAgent(LLMAgent):
         self._llm_config = llm_config.model_copy()
         self._llm_config.max_tokens = 2000
         self._database = database
+        self._name = name
+        self._description = description
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
         self._plan: Queue[SubTask] = Queue()
@@ -82,12 +89,12 @@ class SQLPlannerAgent(LLMAgent):
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return "SQLPlanner"
+        return self._name
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "This agent is expensive and takes as input a complex user question that often require numerous nested reasoning steps and outputs a plan to answer it. This agent should only be used sparingly for complex questions that have multiple steps and nested logic. The output of this agent **must** be used as input to another agent via {stepXX} tags.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a detailed plan for how to answer the SQL."
+        return self._description
 
     @property
     def llm_client(self) -> Client:
@@ -109,7 +116,6 @@ class SQLPlannerAgent(LLMAgent):
     ) -> None:
         """Send a message to another agent."""
         if not message:
-            logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)
@@ -154,10 +160,6 @@ class SQLPlannerAgent(LLMAgent):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        print(self.system_message)
-        print(messages[-1].content)
-        print("SQL PLANNER OUTPUT", content)
-        print("*****")
         return AgentMessage(
             role="assistant",
             content=content,

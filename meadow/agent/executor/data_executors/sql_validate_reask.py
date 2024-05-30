@@ -13,6 +13,8 @@ Below is the data schema the user is working with.
 
 Given the user's message below, please explain the error and suggset in freeform text how to fix the query. The query may need additional tables, fixes in function use, or other modifications. Please provide a detailed explanation of the error and how to fix it."""
 
+DEFAULT_SQL_EXECUTOR_DESC = "Executes SQL queries to check for errors and asks models why there are mistakes and how to fix."
+
 
 class SQLValidateExecutor(ReaskExecutor):
     """Agent that execute/validates a response given an execution function."""
@@ -23,6 +25,8 @@ class SQLValidateExecutor(ReaskExecutor):
         llm_config: LLMConfig,
         database: Database,
         max_execution_attempts: int = 2,
+        description: str = DEFAULT_SQL_EXECUTOR_DESC,
+        system_prompt: str = DEFAULT_SQL_EXECUTOR_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -34,7 +38,8 @@ class SQLValidateExecutor(ReaskExecutor):
             database=database,
             max_execution_attempts=max_execution_attempts,
             execution_func=parse_sql_response,
-            system_prompt=DEFAULT_SQL_EXECUTOR_PROMPT,
+            description=description,
+            system_prompt=system_prompt,
             overwrite_cache=overwrite_cache,
             silent=silent,
             llm_callback=llm_callback,

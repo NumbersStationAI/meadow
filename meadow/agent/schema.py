@@ -1,12 +1,14 @@
 """Agent schema classes."""
 
+import enum
 import logging
 import time
 from typing import Any, Callable
 
 from pydantic import BaseModel, model_validator
 
-from meadow.client.schema import ChatMessage, ToolCall, ToolSpec
+from meadow.client.schema import ChatMessage
+from meadow.database.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -65,21 +67,24 @@ class AgentMessage(ChatMessage):
         return self
 
 
-class ToolRunner(BaseModel):
-    """Executor for a tool."""
+class AgentRole(enum.Enum):
+    """Agent role."""
 
-    """Tool spec sent to model."""
-    tool_spec: ToolSpec
+    SUPERVISOR = enum.auto()
+    EXECUTOR = enum.auto()
 
-    """Default arguments for the tool."""
-    default_arguments: dict[str, Any] = {}
 
-    """Executor function."""
-    executor: Callable[..., Any]
-
-    def run(self, tool_call: ToolCall) -> Any:
-        """Run the tool."""
-        all_args = self.default_arguments.copy()
-        all_args.update(tool_call.arguments)
-        logger.info(f"Running tool={self.tool_spec.name}, args={all_args}")
-        return self.executor(**all_args)
+class ExecutorFunctionInput:
+    def __init__(
+        self,
+        messages: list[AgentMessage],
+        agent_name: str,
+        database: Database,
+        # Can the error be send to the model for correction?
+        # If set to False, this means the error will not be fixed."""
+        can_reask_again: bool,
+    ):
+        self.messages = messages
+        self.agent_name = agent_name
+        self.database = database
+        self.can_reask_again = can_reask_again

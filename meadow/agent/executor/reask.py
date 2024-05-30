@@ -1,10 +1,11 @@
 """Executor agent."""
 
+import functools
 import logging
 from typing import Callable
 
 from meadow.agent.agent import Agent, ExecutorAgent
-from meadow.agent.schema import AgentMessage
+from meadow.agent.schema import AgentMessage, ExecutorFunctionInput
 from meadow.agent.utils import (
     generate_llm_reply,
     print_message,
@@ -24,6 +25,10 @@ Below is the data schema the user is working with.
 
 Given the user's message below, please explain the error and hypothesis how to fix. In free form text, summarize your thinking that explains the error and suggests possible fixes."""
 
+DEFAULT_EXECUTOR_DESC = (
+    "Executes responses and asks models why there are mistakes and how to fix."
+)
+
 ERROR_MESSAGE = """I'm sorry, I'm having a hard time running. Please try to rephrase."""
 
 
@@ -35,11 +40,9 @@ class ReaskExecutor(ExecutorAgent):
         client: Client,
         llm_config: LLMConfig,
         database: Database,
-        # TODO: clean up the execution interface to be standard
-        execution_func: Callable[
-            [list[AgentMessage], str, Database, bool], AgentMessage
-        ],
+        execution_func: Callable[[ExecutorFunctionInput], AgentMessage],
         max_execution_attempts: int = 2,
+        description: str = DEFAULT_EXECUTOR_DESC,
         system_prompt: str = DEFAULT_EXECUTOR_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
@@ -52,6 +55,7 @@ class ReaskExecutor(ExecutorAgent):
         self._execution_func = execution_func
         self._max_execution_attempts = max_execution_attempts
         self._current_execution_attempts = 0
+        self._description = description
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
         self._overwrite_cache = overwrite_cache
@@ -61,19 +65,20 @@ class ReaskExecutor(ExecutorAgent):
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return f"{self._execution_func.__name__}_Executor"
+        if isinstance(self._execution_func, functools.partial):
+            return f"{self._execution_func.func.__name__}_Reask_Executor"
+        else:
+            return f"{self._execution_func.__name__}_Reask_Executor"
 
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return (
-            "Executes responses and asks models why there are mistakes and how to fix."
-        )
+        return self._description
 
     @property
     def execution_func(
         self,
-    ) -> Callable[[list[AgentMessage], str, Database, bool], AgentMessage]:
+    ) -> Callable[[ExecutorFunctionInput], AgentMessage]:
         """The execution function of this agent."""
         return self._execution_func
 
@@ -99,7 +104,6 @@ class ReaskExecutor(ExecutorAgent):
     ) -> None:
         """Send a message to another agent."""
         if not message:
-            logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
         message.receiving_agent = recipient.name
         self._messages.add_message(agent=recipient, role="assistant", message=message)
@@ -141,12 +145,13 @@ class ReaskExecutor(ExecutorAgent):
         can_reask_again = (
             self._current_execution_attempts < self._max_execution_attempts
         )
-        parsed_response = self.execution_func(
-            messages,
-            self.name,
-            self._database,
-            can_reask_again,
+        execution_func_input = ExecutorFunctionInput(
+            messages=messages,
+            agent_name=self.name,
+            database=self._database,
+            can_reask_again=can_reask_again,
         )
+        parsed_response = self.execution_func(execution_func_input)
         if not can_reask_again:
             # This is the final response to the supervisor so set response to False
             parsed_response.requires_response = False

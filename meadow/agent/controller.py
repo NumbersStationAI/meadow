@@ -20,11 +20,11 @@ class ControllerAgent(Agent):
         supervisor: Agent,
         planner: LLMPlannerAgent,
         database: Database,
-        supervisor_auto_respond: bool = False,
-        silent: bool = True,
         name: str = "Controller",
-        # LAUREL: JANKY
-        solidify_drafts: bool = True,
+        description: str = "Controller agent that manages the flow between other agents.",
+        supervisor_auto_respond: bool = False,  # supervisor auto <next>
+        can_solidify_drafts: bool = True,  # whether to finalize drafts - False with executor convos
+        silent: bool = True,
     ):
         self._supervisor = supervisor
         self._planner = planner
@@ -37,14 +37,15 @@ class ControllerAgent(Agent):
         }
         if planner.executors:
             self._agent_executors[planner] = planner.executors
+        self._name = name
+        self._description = description
+        self._can_solidify_drafts = can_solidify_drafts
         # Current agent we are actively talking to (can be supervisor)
         self._current_agent: Agent = self._planner
         # Current agent solving the task (not the supervisor)
         self._current_task_agent: Agent = self._planner
         self._supervisor_auto_respond = supervisor_auto_respond
         self._silent = silent
-        self._name = name
-        self._solidify_drafts = solidify_drafts
 
     @property
     def name(self) -> str:
@@ -54,7 +55,7 @@ class ControllerAgent(Agent):
     @property
     def description(self) -> str:
         """Get the description of the agent."""
-        return "Overlord"
+        return self._description
 
     @property
     def database(self) -> Database:
@@ -130,12 +131,6 @@ class ControllerAgent(Agent):
             self._messages.add_message(
                 agent=self._supervisor, role="assistant", message=reply
             )
-            # self._supervisor._messages.add_message(
-            #     agent=self, role="user", message=reply
-            # )
-            # self._supervisor._messages.add_message(
-            #     agent=self, role="assistant", message=auto_response
-            # )
             await self.receive(auto_response, self._supervisor)
         else:
             await self.send(reply, self._current_agent)
@@ -149,18 +144,21 @@ class ControllerAgent(Agent):
             self.set_current_task_agent(next_task.agent)
             self.set_current_agent(next_task.agent)
             next_message = next_task.prompt
-            # The planner allows for instruction to have message replacment tags like {{stepXX}}
-            # In the planner, we parse all the {{stepXX}} to be {{agentName}} so that right now
-            # we can parse any {{agentName}} to be the last message from that agent.
-            for last_agent_name_message in parse_replacements_in_instruction(
-                next_message
-            ):
-                last_content = self._messages.get_messages(
-                    self._planner.available_agents[last_agent_name_message]
-                )[-1].content
-                next_message = next_message.replace(
-                    f"{{{last_agent_name_message}}}", last_content
-                )
+            # The planner allows for instruction to have message replacment tags like {stepXX}
+            # In the planner, we parse all the {stepXX} to be {agentName} so that right now
+            # we can parse any {agentName} to be the last message from that agent. As executors
+            # are directly processing outputs from agents, we do not want to change the input at all.
+            # This  is expecially true for the planner parsing executor that needs to raw {stepXX}.
+            if not isinstance(self._current_agent, ExecutorAgent):
+                for last_agent_name_message in parse_replacements_in_instruction(
+                    next_message
+                ):
+                    last_content = self._messages.get_messages(
+                        self._planner.available_agents[last_agent_name_message]
+                    )[-1].content
+                    next_message = next_message.replace(
+                        f"{{{last_agent_name_message}}}", last_content
+                    )
             # Agents can be single LLMAgents or PlannerAgents. PlannerAgents own collections of subagents that they
             # coordinate between. We need to start a subchat with that planner agent here.
             if isinstance(self._current_agent, LLMPlannerAgent):
@@ -208,7 +206,12 @@ class ControllerAgent(Agent):
     ) -> AgentMessage:
         """Generate a reply after execution.
 
-        FOX ME
+        Some agents require executors - models to go and parse their responses
+        and catch errors. If the message requires execution and the agent has executors,
+        we start a hierarchical chat between the agent and its current executor.
+
+        We send the result message (or default one if no executors) to either the
+        supervisor or agent, depending on who send the message.
         """
         executor_response = None
         default_response = AgentMessage(
@@ -233,10 +236,9 @@ class ControllerAgent(Agent):
                         database=None,
                     ),
                     database=self.database,
+                    can_solidify_drafts=False,
                     supervisor_auto_respond=True,
                     silent=self._silent,
-                    # SUPER JANKY
-                    solidify_drafts=False,
                 )
                 sender.set_chat_role(AgentRole.SUPERVISOR)
                 # TODO: clean up
@@ -253,7 +255,7 @@ class ControllerAgent(Agent):
                 sender.set_chat_role(AgentRole.EXECUTOR)
             # Finalize any temporary draft data views made and edited by the executors into final
             # views for the next step
-            if self._solidify_drafts:
+            if self._can_solidify_drafts:
                 self.database.finalize_draft_views()
         final_response = last_message or default_response
         # The current_task_agent is the agent of the task that is currently answering the user's
@@ -269,8 +271,12 @@ class ControllerAgent(Agent):
         messages: list[AgentMessage],
         sender: Agent,
     ) -> AgentMessage:
-        """Generate a reply based on the received messages."""
-        # TODO: add comments once finalized
+        """Generate a reply based on the received messages.
+
+        We handle the DSL commands here and generate the appropriate reply. If the message
+        is a termination message, we return it immediately. If the message is a next message,
+        we move to the next step in the task plan. Otherwise, we generate the response and return.
+        """
         if Commands.has_next(messages[-1].content):
             assert sender == self._supervisor, "Only user can send move on message."
             return await self._generate_next_step_reply(messages, sender)
@@ -308,14 +314,12 @@ class ControllerAgent(Agent):
             role="user", content=input, sending_agent=self._supervisor.name
         )
         await self.receive(message, self._supervisor)
+        # The last message send to the controller that isn't a NEXT or END
+        # message is the final response of a chat.
         all_messages = self._messages.get_messages_linearly_by_time()
         for message in reversed(all_messages):
             if not Commands.has_end(message.content) and not Commands.has_next(
                 message.content
             ):
-                # print("CHAT RESPONSE", self.name, "SUP", self._supervisor.name)
-                # print(
-                #     "RETURNING", message.content, "-----\n\n", message.display_content
-                # )
                 return message
         return None
