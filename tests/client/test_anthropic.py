@@ -12,6 +12,7 @@ from meadow.client.schema import (
     ChatRequest,
     ChatResponse,
     Choice as MeadowChoice,
+    FunctionArgSpec,
     ToolCall,
     ToolSpec,
     Usage as MeadowUsage,
@@ -44,7 +45,7 @@ def chat_completion() -> ToolsBetaMessage:
             ),
         ],
         model="claude-3-opus-20240229",
-        role=ClientMessageRole.SENDER,
+        role="assistant",
         stop_reason="max_tokens",
         stop_sequence=None,
         type="message",
@@ -128,7 +129,7 @@ def test_convert_anthropic_to_response(
                     index=0,
                     message=ChatMessage(
                         content='<thinking>\nThe user has directly provided a question to ask the query_gen tool:\n"How many cats do I have?"\n\nSince the query_gen tool takes a single required parameter "question" of type string, and the user has provided the question string, we have all the required information to call the tool.\n</thinking>',
-                        role=ClientMessageRole.SENDER,
+                        role="assistant",
                         tool_calls=[
                             ToolCall(
                                 unparsed_arguments='{"question": "How many cats do I have?"}',
@@ -177,7 +178,7 @@ def test_convert_anthropic_to_multi_messageresponse(
                     index=0,
                     message=ChatMessage(
                         content='<thinking>\nThe user has directly provided a question to ask the query_gen tool:\n"How many cats do I have?"\n\nSince the query_gen tool takes a single required parameter "question" of type string, and the user has provided the question string, we have all the required information to call the tool.\n</thinking>',
-                        role=ClientMessageRole.SENDER,
+                        role="assistant",
                         tool_calls=[
                             ToolCall(
                                 unparsed_arguments='{"question": "How many cats do I have?"}',
@@ -190,7 +191,7 @@ def test_convert_anthropic_to_multi_messageresponse(
                     index=1,
                     message=ChatMessage(
                         content="<thinking>I guess I should really get on this</thinking>",
-                        role=ClientMessageRole.SENDER,
+                        role="assistant",
                         tool_calls=[
                             ToolCall(
                                 unparsed_arguments='{"question": "Cats are dead to me?"}',
@@ -218,7 +219,7 @@ async def test_arun_chat(
     """Test sending a chat request."""
     # make return value work with await expression
     mock_response = AsyncMock(return_value=chat_completion)
-    anthropic_client.client.beta.tools.messages.create = mock_response
+    anthropic_client.client.beta.tools.messages.create = mock_response  # type: ignore
     response = await anthropic_client.arun_chat(chat_request)
     anthropic_client.client.beta.tools.messages.create.assert_called_once_with(
         **anthropic_client.convert_request_for_anthropic(chat_request), system=None
@@ -233,7 +234,7 @@ async def test_arun_chat(
                     index=0,
                     message=ChatMessage(
                         content='<thinking>\nThe user has directly provided a question to ask the query_gen tool:\n"How many cats do I have?"\n\nSince the query_gen tool takes a single required parameter "question" of type string, and the user has provided the question string, we have all the required information to call the tool.\n</thinking>',
-                        role=ClientMessageRole.SENDER,
+                        role="assistant",
                         tool_calls=[
                             ToolCall(
                                 unparsed_arguments='{"question": "How many cats do I have?"}',
@@ -269,18 +270,18 @@ async def test_arun_chat(
                 name="query_gen",
                 description="Query generator",
                 function_args=[
-                    {
-                        "name": "question",
-                        "description": "The question to generate a query for",
-                        "type": "string",
-                        "required": True,
-                    }
+                    FunctionArgSpec(
+                        name="question",
+                        description="The question to generate a query for",
+                        type="string",
+                        required=True,
+                    )
                 ],
             )
         ],
     )
     mock_response = AsyncMock(return_value=chat_completion)
-    anthropic_client.client.beta.tools.messages.create = mock_response
+    anthropic_client.client.beta.tools.messages.create = mock_response  # type: ignore
     response = await anthropic_client.arun_chat(chat_request_system)
     anthropic_client.client.beta.tools.messages.create.assert_called_once_with(
         # We use the original chat_request for conversion here as it doens't have system message

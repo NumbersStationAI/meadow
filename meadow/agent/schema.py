@@ -4,7 +4,7 @@ import enum
 import logging
 import time
 
-from pydantic import field_validator, model_validator
+from pydantic import model_validator
 
 from meadow.client.schema import ChatMessage
 from meadow.database.database import Database
@@ -42,11 +42,14 @@ class ClientMessageRole(str, enum.Enum):
     LLMs in chat messages require the role to be "user", "assistant", or "system".
     In the agent chat framework, the role is determined by if an agent is sending
     or receiving a message. We handle that mapping here.
+
+    SENDER == "assistant" and RECEIVER == "user".
     """
 
     SENDER = "assistant"
     RECEIVER = "user"
-    """Used internally for agents to define their own system messages for the LLM."""
+
+    # Used internally for agents to define their own system messages for the LLM.
     SYSTEM = "system"
 
 
@@ -99,7 +102,7 @@ class AgentMessage(ChatMessage):
         return self
 
     @model_validator(mode="after")
-    def set_chat_role(self) -> "AgentMessage":
+    def set_chat_role(self) -> None:
         """
         Set chat message role from the agent_role.
         """

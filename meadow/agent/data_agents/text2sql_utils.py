@@ -199,8 +199,8 @@ def parse_and_run_sql_for_debugger(
     for col in df.columns:
         # Means there are duplicate column names
         if len(df[col].shape) == 2 and df[col].shape[1] > 1:
-            if df[col].iloc[:, 0].dtype == "object":
-                df[col].iloc[:, 0] = df[col].iloc[:, 0].apply(lambda x: f"'{x}'")
+            if df[col].iloc[:, 0].dtype == "object":  # type: ignore
+                df[col].iloc[:, 0] = df[col].iloc[:, 0].apply(lambda x: f"'{x}'")  # type: ignore
         else:
             if df[col].dtype == "object":
                 df[col] = df[col].apply(lambda x: f"'{x}'")

@@ -47,13 +47,15 @@ def parse_rename_and_update_db(
     input: ExecutorFunctionInput,
 ) -> AgentMessage:
     """Parse the message and update the database."""
-    content = input.messages[-1].content
+    content_str = input.messages[-1].content
     error_message: str = None
     try:
-        if "```json" in content:
-            json_content = re.findall(r"```json\n(.*?)\n```", content, re.DOTALL)[-1]
+        if "```json" in content_str:
+            json_content = re.findall(r"```json\n(.*?)\n```", content_str, re.DOTALL)[
+                -1
+            ]
         else:
-            json_content = content
+            json_content = content_str
         content: dict[str, dict[str, str]] = json.loads(json_content)
     except json.JSONDecodeError as e:
         error_message = f"The content is not a valid JSON object.\n{e}"
@@ -184,6 +186,20 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
     def executors(self) -> list[ExecutorAgent] | None:
         """The executor agents that should be used by this agent."""
         return self._executors
+
+    def get_messages(self, chat_agent: "Agent") -> list[AgentMessage]:
+        """Get the messages between self and the chat_agent."""
+        return self._messages.get_messages(chat_agent)
+
+    def add_to_messages(
+        self, chat_agent: "Agent", messages: list[AgentMessage]
+    ) -> None:
+        """Add chat messages between self and chat_agent.
+
+        Used when starting hierarchical chats and historical messages
+        need to be passed to the agent.
+        """
+        self._messages.copy_messages_from(chat_agent, messages)
 
     async def send(
         self,

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import abstractmethod
 from typing import Callable
 
@@ -21,12 +23,12 @@ class Agent:
         ...
 
     @property
-    def planner(self) -> "LLMPlannerAgent":
+    def planner(self) -> LLMPlannerAgent:
         """The planner of the agent."""
         return None
 
     @property
-    def executors(self) -> list["ExecutorAgent"] | None:
+    def executors(self) -> list[ExecutorAgent] | None:
         """The executors of the agent."""
         return None
 
@@ -37,10 +39,24 @@ class Agent:
         return
 
     @abstractmethod
+    def get_messages(self, chat_agent: Agent) -> list[AgentMessage]:
+        """Get the messages between self and the chat_agent."""
+        ...
+
+    @abstractmethod
+    def add_to_messages(self, chat_agent: Agent, messages: list[AgentMessage]) -> None:
+        """Add chat messages between self and chat_agent.
+
+        Used when starting hierarchical chats and historical messages
+        need to be passed to the agent.
+        """
+        ...
+
+    @abstractmethod
     async def send(
         self,
         message: AgentMessage,
-        recipient: "Agent",
+        recipient: Agent,
     ) -> None:
         """Send a message to another agent."""
         ...
@@ -49,7 +65,7 @@ class Agent:
     async def receive(
         self,
         message: AgentMessage,
-        sender: "Agent",
+        sender: Agent,
     ) -> None:
         """Receive a message from another agent."""
 
@@ -57,7 +73,7 @@ class Agent:
     async def generate_reply(
         self,
         messages: list[AgentMessage],
-        sender: "Agent",
+        sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
 
@@ -75,7 +91,7 @@ class LLMAgentWithExecutors(LLMAgent):
     """LLM agent with executors."""
 
     @property
-    def executors(self) -> list["ExecutorAgent"] | None:
+    def executors(self) -> list[ExecutorAgent] | None:
         """The executors of the agent."""
         raise NotImplementedError
 
@@ -89,10 +105,10 @@ class LLMAgentWithExecutors(LLMAgent):
 class SubTask:
     """Sub-task in a plan."""
 
-    agent: "Agent"
+    agent: Agent
     prompt: str
 
-    def __init__(self, agent: "Agent", prompt: str):
+    def __init__(self, agent: Agent, prompt: str):
         self.agent = agent
         self.prompt = prompt
 
@@ -102,7 +118,7 @@ class LLMPlannerAgent(LLMAgent):
 
     @property
     @abstractmethod
-    def available_agents(self) -> dict[str, "Agent"]:
+    def available_agents(self) -> dict[str, Agent]:
         """Get the available agents."""
         raise NotImplementedError
 

@@ -50,7 +50,7 @@ def serialize_as_list(
         if skip_draft and table.is_draft:
             continue
         serialized_table = f"# {table.name}("
-        serialized_table += ", ".join([column.name for column in table.columns])
+        serialized_table += ", ".join([column.name for column in table.columns or []])
         serialized_table += ")"
         if table.description:
             serialized_table += f": {table.description}"
@@ -65,7 +65,7 @@ def serialize_as_list(
             serialized_table += "\n#    " + "\n#    ".join(table_lines)
         if add_constraints:
             join_str = ""
-            for column in table.columns:
+            for column in table.columns or []:
                 # if column.primary_key:
                 #     serialized_table += f"\n#    PRIMARY KEY({column.name})"
                 if column.foreign_keys:

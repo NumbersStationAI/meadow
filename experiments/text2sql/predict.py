@@ -4,7 +4,6 @@ import asyncio
 import copy
 import datetime
 import json
-import logging
 import random
 import re
 from pathlib import Path
@@ -337,7 +336,7 @@ def predict(
     if num_run > 0:
         console.print(f"Running on {min(len(data), num_run)} examples")
         data = data[:num_run]
-    
+
     # data = [t for t in data if "flight" in t["db_id"]]
     original_data = data
 
@@ -368,11 +367,11 @@ def predict(
         run_name = f"{run_name}_"
 
     agent_type_str = (
-        ("reask_" if add_reask else "") + 
-        ("empty_" if add_empty_table else "") + 
-        ("decomposer_" if add_decomposer else "") + 
+        ("reask_" if add_reask else "") +
+        ("empty_" if add_empty_table else "") +
+        ("decomposer_" if add_decomposer else "") +
         ("sqlplanner_" if add_sql_planner else "") +
-        ("attribute_" if add_attribute_selector else "") + 
+        ("attribute_" if add_attribute_selector else "") +
         ("cleaner_" if add_schema_cleaner else "")
     )
     agent_type_str = agent_type_str.rstrip("_")

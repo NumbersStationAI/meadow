@@ -1,5 +1,6 @@
 import logging
 from functools import partial
+from typing import Callable
 
 import pandas as pd
 import sqlglot
@@ -35,12 +36,14 @@ def _remap_table_sql(
     return node
 
 
-def _get_base_remapping_sql(base_table: Table, new_table: Table) -> str:
+def _get_base_remapping_sql(
+    base_table: Table, new_table: Table, quote_func: Callable[[str], str]
+) -> str:
     """Get the SQL for remapping base tables."""
     column_aliases = []
     for old_column, new_column in zip(base_table.columns, new_table.columns):
         column_aliases.append(
-            f"{base_table.name}.'{old_column.name}' AS '{new_column.name}'"
+            f"{base_table.name}.{quote_func(old_column.name)} AS {quote_func(new_column.name)}"
         )
     sql = f"SELECT {', '.join(column_aliases)} "
     sql += f"FROM {base_table.name}"
@@ -62,7 +65,7 @@ def add_views_as_ctes(
         existing_ctes = parsed.args["with"]
         del parsed.args["with"]
     for view_name, view_sql in view_sql_pairs:
-        parsed = parsed.with_(view_name, view_sql)
+        parsed = parsed.with_(view_name, view_sql)  # type: ignore
     if existing_ctes:
         parsed.args["with"].args["expressions"].extend(
             existing_ctes.args["expressions"]
@@ -75,6 +78,7 @@ def add_base_table_remaps_as_ctes(
     sql: str,
     base_table_remapping: dict[str, Table],
     base_tables: dict[str, Table],
+    quote_func: Callable[[str], str],
     dialect: str = "sqlite",
 ) -> str:
     """Add base table remaps as CTEs."""
@@ -84,7 +88,7 @@ def add_base_table_remaps_as_ctes(
     base_table_view_sql_pairs = []
     for k, table in base_table_remapping.items():
         base_table_view_sql_pairs.append(
-            (f"{k}_", _get_base_remapping_sql(base_tables[k], table))
+            (f"{k}_", _get_base_remapping_sql(base_tables[k], table, quote_func))
         )
 
     parsed = sqlglot.parse_one(sql, dialect=dialect)
@@ -100,7 +104,7 @@ def add_base_table_remaps_as_ctes(
         existing_ctes = parsed.args["with"]
         del parsed.args["with"]
     for view_name, view_sql in base_table_view_sql_pairs:
-        parsed = parsed.with_(view_name, view_sql)
+        parsed = parsed.with_(view_name, view_sql)  # type: ignore
     if existing_ctes:
         parsed.args["with"].args["expressions"].extend(
             existing_ctes.args["expressions"]
@@ -118,16 +122,19 @@ def map_dtype_to_sql(dtype: str) -> str:
     """Map pandas data type to SQLite data type."""
     mapping = {
         "int64": "INTEGER",
+        "int32": "INTEGER",
+        "int16": "INTEGER",
+        "int8": "INTEGER",
         "float64": "REAL",
+        "float32": "REAL",
+        "float16": "REAL",
+        "float8": "REAL",
         "object": "TEXT",
         "bool": "INTEGER",
         "datetime64[ns]": "TEXT",  # SQLite does not have a dedicated datetime type
         "timedelta[ns]": "TEXT",
     }
     if dtype not in mapping:
-        import ipdb
-
-        ipdb.set_trace()
         logger.warning(f"Unknown dtype {dtype}")
     return mapping.get(dtype, "TEXT")  # Default to TEXT if dtype is not found
 
@@ -137,7 +144,7 @@ def extract_columns_from_df(df: pd.DataFrame) -> list[Column]:
     columns = []
     for column_name in df.columns:
         if len(df[column_name].shape) == 2 and df[column_name].shape[1] > 1:
-            data_type = df[column_name].iloc[:, 0].dtype.name
+            data_type = df[column_name].iloc[:, 0].dtype.name  # type: ignore
         else:
             data_type = df[column_name].dtype.name
         sql_dtype = map_dtype_to_sql(data_type)
@@ -150,7 +157,7 @@ def get_non_matching_fks(all_tables: dict[str, Table]) -> list[tuple[str, str]]:
     non_match_pairs = []
     for _, table in all_tables.items():
         for column in table.columns:
-            for fk in column.foreign_keys:
+            for fk in column.foreign_keys or []:
                 other_table = all_tables[fk[0]]
                 other_column = other_table.columns[fk[1]]
                 if other_column.name != column.name:
@@ -174,6 +181,7 @@ def check_if_non_select_query(sql: str) -> bool:
         or parsed.find(sqlglot.exp.Delete)
         or parsed.find(sqlglot.exp.AlterTable)
         or parsed.find(sqlglot.exp.AlterColumn)
+        or parsed.find(sqlglot.exp.Command)
     ):
         return True
     return False
@@ -317,6 +325,10 @@ class Database:
         viewed_sql = add_views_as_ctes(sql, view_sql_pairs)
         # Add base table views for the column remaps
         base_table_sql = add_base_table_remaps_as_ctes(
-            viewed_sql, self._base_table_remapping, self._base_tables
+            viewed_sql,
+            self._base_table_remapping,
+            self._base_tables,
+            quote_func=self._connector.quote,
+            dialect=self._connector.dialect,
         )
         return base_table_sql

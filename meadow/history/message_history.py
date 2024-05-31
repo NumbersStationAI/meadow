@@ -39,9 +39,15 @@ class MessageHistory:
         message.agent_role = agent_role
         # Set the role of the message. This typically happens internally
         message.role = agent_role.value
+        # Setting the time on add enforces uniqueness across all history agents
         message.creation_time = time.time()
         assert is_time_unique(self._history, message.creation_time)
         self._history[agent].append(message)
+
+    def copy_messages_from(self, agent: Agent, messages: list[AgentMessage]) -> None:
+        """Copy a list of messages to another agent."""
+        for message in messages:
+            self.add_message(agent, message.agent_role, message)
 
     def get_messages(
         self, recipient: Agent, skip_termination_pairs: bool = True

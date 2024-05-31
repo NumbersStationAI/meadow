@@ -22,6 +22,9 @@ class DuckDBConnector(Connector):
         """Get the dialect of the database."""
         return "duckdb"
 
+    def quote(self, value: str) -> str:
+        return f'"{value}"'
+
     def connect(self) -> None:
         """Connect to the database."""
         self.conn = duckdb.connect(self.db_path)
@@ -54,7 +57,7 @@ FROM information_schema.columns;
         tables = []
         for table_name in df["table_name"].unique():
             table_df = df[df["table_name"] == table_name]
-            columns = []
+            columns: list[Column] = []
             for _, row in table_df.iterrows():
                 columns.append(
                     Column(
@@ -62,5 +65,17 @@ FROM information_schema.columns;
                         data_type=row["data_type"],
                     )
                 )
-            tables.append(Table(name=table_name, columns=columns))
+            # Try to get data deterministically
+            column_str = ", ".join([c.name for c in columns])
+            data_sample_query = (
+                f"SELECT DISTINCT * FROM {table_name} ORDER BY {column_str} LIMIT 5"
+            )
+            data_df = self.run_sql_to_df(data_sample_query)
+            tables.append(
+                Table(
+                    name=table_name,
+                    columns=columns,
+                    data=data_df.to_dict(orient="records"),
+                )
+            )
         return tables

@@ -6,8 +6,8 @@ from collections import defaultdict
 
 import pandas as pd
 import sqlglot
-from sqlglot import parse_one
 import textdistance
+from sqlglot import parse_one
 
 from meadow.client.client import Client
 from meadow.database.connector.connector import Column, Table
@@ -159,7 +159,7 @@ def compare_pred_ref(
     Returns:
         a float score measuring similarity f1 looking at the collection of rows
     """
-    # For each column in the ref_df, find the matching column (if exists) in the 
+    # For each column in the ref_df, find the matching column (if exists) in the
     # pred_df and compare the values via F1 (if order doesn't matter) or directly (if order matters)
     pred_cols_mapped = [ref_to_pred_col_map.get(ref_col) for ref_col in ref_df.columns if ref_to_pred_col_map.get(ref_col) is not None]
     pred_df_to_compare = pred_df[pred_cols_mapped]
@@ -198,7 +198,7 @@ def execution_accuracy(
         return 0, 0
     try:
         df_pred = database.run_sql_to_df(pred)
-    except Exception as e:
+    except Exception:
         return 0, 0
     df_gold = database.run_sql_to_df(gold)
     # Try to find matching columns for each col in df

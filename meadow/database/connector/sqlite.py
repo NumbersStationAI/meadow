@@ -23,6 +23,9 @@ class SQLiteConnector(Connector):
         """Get the dialect of the database."""
         return "sqlite"
 
+    def quote(self, value: str) -> str:
+        return f"'{value}'"
+
     def connect(self) -> None:
         """Connect to the database."""
         self.conn = sqlite3.connect(self.db_path)
@@ -76,8 +79,18 @@ FROM pragma_table_info('{table_name}');
                 # sample_values = self.get_column_sample_values(table_name, row.column_name)  # type: ignore
                 columns.append(Column(name=row.column_name, data_type=row.data_type))  # type: ignore
             columns = [
-                Column(name=row.column_name, data_type=row.data_type)
+                Column(name=row.column_name, data_type=row.data_type)  # type: ignore
                 for row in columns_df.itertuples()
             ]
-            tables.append(Table(name=table_name, columns=columns))
+            # Try to get data deterministically
+            column_str = ", ".join([c.name for c in columns])
+            data_sample_query = (
+                f"SELECT DISTINCT * FROM {table_name} ORDER BY {column_str} LIMIT 5"
+            )
+            df = self.run_sql_to_df(data_sample_query)
+            tables.append(
+                Table(
+                    name=table_name, columns=columns, data=df.to_dict(orient="records")
+                )
+            )
         return tables

@@ -70,6 +70,20 @@ class ControllerAgent(Agent):
         """Set the current task."""
         self._current_task_agent = agent
 
+    def get_messages(self, chat_agent: "Agent") -> list[AgentMessage]:
+        """Get the messages between self and the chat_agent."""
+        return self._messages.get_messages(chat_agent)
+
+    def add_to_messages(
+        self, chat_agent: "Agent", messages: list[AgentMessage]
+    ) -> None:
+        """Add chat messages between self and chat_agent.
+
+        Used when starting hierarchical chats and historical messages
+        need to be passed to the agent.
+        """
+        self._messages.copy_messages_from(chat_agent, messages)
+
     async def send(
         self,
         message: AgentMessage,
@@ -246,13 +260,10 @@ class ControllerAgent(Agent):
                     silent=self._silent,
                 )
                 sender.set_chat_role(AgentRole.SUPERVISOR)
-                # TODO: clean up
-                sender._messages._history[sub_controller] = [
-                    msg.model_copy() for msg in sender._messages._history[self]
-                ]
-                sub_controller._messages._history[sender] = [
-                    msg.model_copy() for msg in self._messages._history[sender]
-                ]
+                # Warmstart the conversation with the sub_controller and sender with that
+                # chat between self and sender
+                sender.add_to_messages(sub_controller, sender.get_messages(self))
+                sub_controller.add_to_messages(sender, self.get_messages(sender))
                 executor_response = await sub_controller.initiate_chat(
                     last_message.content
                 )

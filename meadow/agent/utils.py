@@ -56,7 +56,7 @@ async def generate_llm_reply(
     llm_callback: Callable = None,
     overwrite_cache: bool = False,
 ) -> ChatResponse:
-    """Generate a reply using autogen.oai."""
+    """Generate a reply using client chat method."""
     # Make sure the chat role is updated wrt to the agent role
     # This should technically be handled in the agents, but if someone
     # forgets to update the role from the agent_role, we do it here
