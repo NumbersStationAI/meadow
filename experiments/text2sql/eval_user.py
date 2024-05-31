@@ -1,5 +1,5 @@
 from meadow.agent.agent import Agent
-from meadow.agent.schema import AgentMessage, ClientMessageRole, Commands
+from meadow.agent.schema import AgentMessage, Commands
 from meadow.agent.user import UserAgent
 from meadow.agent.utils import print_message
 

@@ -18,9 +18,6 @@ from meadow.client.client import Client
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "."))
 # from metrics.spider import evaluation as spider_evaluation  # type: ignore # noqa: E402
-from meadow.client.api.openai import OpenAIClient
-from meadow.database.connector.sqlite import SQLiteConnector
-from meadow.database.database import Database
 from metrics.test_suite_sql_eval import (  # type: ignore # noqa: E402
     evaluation as test_suite_evaluation,
 )
@@ -30,6 +27,9 @@ from experiments.text2sql.utils import (  # type: ignore  # noqa: E402
     edit_distance,
     execution_accuracy,
 )
+from meadow.client.api.openai import OpenAIClient
+from meadow.database.connector.sqlite import SQLiteConnector
+from meadow.database.database import Database
 
 LEVELS = ["easy", "medium", "hard", "duckdb", "ddl", "all"]
 PARTIAL_TYPES = [
@@ -179,7 +179,7 @@ def compute_execution_accuracy(
             scores.append(exec_score)
             empty_res_scores.append(empty_res_score)
             empty_res_gold_scores.append(empty_res_gold_score)
-        except Exception as e:
+        except Exception:
             scores.append(0)
             empty_res_scores.append(0)
             empty_res_gold_scores.append(0)
@@ -330,7 +330,7 @@ def evaluate(
     cache = DuckDBCache(client_cache_path)
     api_provider = OpenAIClient(api_key=api_key)
     client = Client(api_client=api_provider, model=model, cache=cache)
-    
+
     # Setup sqls
     gold_path = Path(gold)
     pred_path = Path(pred)

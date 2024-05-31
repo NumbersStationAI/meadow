@@ -96,6 +96,11 @@ class Connector(ABC):
         pass  # pragma: no cover
 
     @abstractmethod
+    def quote(self, value: str) -> str:
+        """Quote a value."""
+        pass  # pragma: no cover
+
+    @abstractmethod
     def connect(self) -> None:
         """Connect to the database."""
         pass  # pragma: no cover

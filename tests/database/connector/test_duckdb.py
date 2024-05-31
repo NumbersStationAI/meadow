@@ -42,6 +42,11 @@ def test_duckdb_connector_init(duckdb_connector: DuckDBConnector) -> None:
     ), "Database file should be set correctly."
 
 
+def test_duckdb_quote(duckdb_connector: DuckDBConnector) -> None:
+    """Test quoting values for DuckDB."""
+    assert duckdb_connector.quote("test") == '"test"', "Value should be quoted."
+
+
 def test_duckdb_connector_connect(duckdb_connector: DuckDBConnector) -> None:
     """Test connection to DuckDB."""
     duckdb_connector.connect()
@@ -61,6 +66,10 @@ def test_duckdb_connector_get_tables(duckdb_connector: DuckDBConnector) -> None:
     assert len(table.columns) == 2, "There should be two columns."
     assert table.columns[0].name == "id", "First column should be 'id'."
     assert table.columns[1].name == "name", "Second column should be 'name'."
+    assert table.data == [
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "name": "Bob"},
+    ]
 
 
 @pytest.mark.parametrize(

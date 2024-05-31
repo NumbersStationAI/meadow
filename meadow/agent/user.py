@@ -36,6 +36,20 @@ class UserAgent(Agent):
         a group chat setting."""
         return self._description
 
+    def get_messages(self, chat_agent: "Agent") -> list[AgentMessage]:
+        """Get the messages between self and the chat_agent."""
+        return self._messages.get_messages(chat_agent)
+
+    def add_to_messages(
+        self, chat_agent: "Agent", messages: list[AgentMessage]
+    ) -> None:
+        """Add chat messages between self and chat_agent.
+
+        Used when starting hierarchical chats and historical messages
+        need to be passed to the agent.
+        """
+        self._messages.copy_messages_from(chat_agent, messages)
+
     async def send(
         self,
         message: AgentMessage,

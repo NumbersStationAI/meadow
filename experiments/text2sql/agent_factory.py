@@ -1,4 +1,5 @@
 import logging
+from typing import Callable
 
 from pydantic import BaseModel
 
@@ -9,7 +10,9 @@ from meadow.agent.data_agents.schema_renamer import SchemaRenamerAgent
 from meadow.agent.data_agents.sql_decomposer import SQLDecomposerAgent
 from meadow.agent.data_agents.sql_planner import SQLPlannerAgent
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
-from meadow.agent.executor.data_executors.empty_result_debugger import EmptyResultExecutor
+from meadow.agent.executor.data_executors.empty_result_debugger import (
+    EmptyResultExecutor,
+)
 from meadow.agent.executor.data_executors.sql_validate_reask import SQLValidateExecutor
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
@@ -82,8 +85,6 @@ def model_callback(
     )
 
 
-from typing import Callable, List, Optional
-
 def get_text2sql_agent(
     benchmark: str,
     user_agent: UserAgent,
@@ -92,7 +93,7 @@ def get_text2sql_agent(
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
-    all_prompts_to_save: List,
+    all_prompts_to_save: list,
     example_idx: int,
     add_reask: bool,
     add_empty_table: bool,
@@ -151,7 +152,7 @@ def get_text2sql_agent(
             llm_callback=callback_decomp,
         )
         agents.insert(0, text2sql_decomposer)
-    
+
     if add_sql_planner:
         callback_planner: Callable = lambda model_messages, chat_response: model_callback(
             model_messages, chat_response, example_idx, "PlannerAgent", all_prompts_to_save
@@ -176,7 +177,7 @@ def get_text2sql_agent(
             llm_callback=callback_attr,
         )
         agents.insert(0, attribute_detector)
-    
+
     if add_schema_cleaner:
         callback_clean: Callable = lambda model_messages, chat_response: model_callback(
             model_messages, chat_response, example_idx, "SchemaCleanerAgent", all_prompts_to_save

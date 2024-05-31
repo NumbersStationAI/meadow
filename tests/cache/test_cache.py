@@ -39,9 +39,7 @@ def test_set_and_get(duckdb_cache: tuple[Cache, str]) -> None:
         choices=[
             Choice(
                 index=0,
-                message=ChatMessage(
-                    role=ClientMessageRole.SENDER, content="I'm a bunny!"
-                ),
+                message=ChatMessage(role="assistant", content="I'm a bunny!"),
             )
         ],
         created=1631987231,

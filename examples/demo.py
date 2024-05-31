@@ -1,68 +1,23 @@
 import argparse
 import asyncio
-import sys
 
 from meadow import Client
-from meadow.agent.agent import Agent
 from meadow.agent.controller import ControllerAgent
-from meadow.agent.data_agents.text2sql import SQLGeneratorAgent, parse_sql_response
-from meadow.agent.data_agents.text2sql_utils import check_empty_table
+from meadow.agent.data_agents.attribute_detector import AttributeDetectorAgent
+from meadow.agent.data_agents.schema_renamer import SchemaRenamerAgent
+from meadow.agent.data_agents.sql_planner import SQLPlannerAgent
+from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
 from meadow.cache import DuckDBCache
 from meadow.client.api.anthropic import AnthropicClient
+from meadow.client.api.api_client import APIClient
 from meadow.client.api.openai import OpenAIClient
 from meadow.client.schema import LLMConfig
+from meadow.database.connector.connector import Connector
 from meadow.database.connector.duckdb import DuckDBConnector
 from meadow.database.connector.sqlite import SQLiteConnector
 from meadow.database.database import Database
-
-sys.path.append("/home/lorr1/projects/code/meadow/experiments/text2sql")
-from agent_factory import SIMPLE_SQL_PROMPT
-from eval_user import EvalUserAgent
-
-
-def get_simple_text2sql_agent(
-    user_agent: UserAgent,
-    client: Client,
-    big_client: Client,
-    llm_config: LLMConfig,
-    database: Database,
-    overwrite_cache: bool,
-) -> Agent:
-    """Get a simple text2sql agent."""
-    text2sql = SQLGeneratorAgent(
-        client=client,
-        llm_config=llm_config,
-        database=database,
-        executors=[
-            ReaskExecutor(
-                client=None,
-                llm_config=llm_config,
-                database=database,
-                execution_func=parse_sql_response,
-                max_execution_attempts=0,
-            ),
-            ReaskExecutor(
-                client=None,
-                llm_config=None,
-                database=database,
-                execution_func=check_empty_table,
-                max_execution_attempts=0,
-            ),
-        ],
-        system_prompt=SIMPLE_SQL_PROMPT,
-        overwrite_cache=overwrite_cache,
-    )
-    planner = PlannerAgent(
-        available_agents=[text2sql],
-        client=None,
-        llm_config=llm_config,
-        database=database,
-        overwrite_cache=overwrite_cache,
-    )
-    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
-    return controller
 
 
 def get_full_text2sql_agent(
@@ -72,8 +27,26 @@ def get_full_text2sql_agent(
     llm_config: LLMConfig,
     database: Database,
     overwrite_cache: bool,
-) -> Agent:
+) -> ControllerAgent:
     """Get a full text2sql agent."""
+    sql_planner = SQLPlannerAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        overwrite_cache=overwrite_cache,
+    )
+    attribute_detector = AttributeDetectorAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        overwrite_cache=overwrite_cache,
+    )
+    schema_cleaner = SchemaRenamerAgent(
+        client=client,
+        llm_config=llm_config,
+        database=database,
+        overwrite_cache=overwrite_cache,
+    )
     text2sql = SQLGeneratorAgent(
         client=client,
         llm_config=llm_config,
@@ -81,13 +54,15 @@ def get_full_text2sql_agent(
         overwrite_cache=overwrite_cache,
     )
     planner = PlannerAgent(
-        available_agents=[text2sql],
+        available_agents=[schema_cleaner, attribute_detector, sql_planner, text2sql],
         client=big_client,
         llm_config=llm_config,
         database=database,
         overwrite_cache=overwrite_cache,
     )
-    controller = ControllerAgent(supervisor=user_agent, planner=planner, silent=True)
+    controller = ControllerAgent(
+        supervisor=user_agent, planner=planner, database=database, silent=True
+    )
     return controller
 
 
@@ -105,7 +80,7 @@ def run_meadow(
 
     # Build database
     if db_type == "duckdb":
-        connector = DuckDBConnector(db_path)
+        connector: Connector = DuckDBConnector(db_path)
     elif db_type == "sqlite":
         connector = SQLiteConnector(db_path)
     else:
@@ -116,7 +91,7 @@ def run_meadow(
     cache = DuckDBCache("test_cache.duckdb")
 
     if api_provider == "anthropic":
-        api_client = AnthropicClient(api_key=api_key)
+        api_client: APIClient = AnthropicClient(api_key=api_key)
     elif api_provider == "openai":
         api_client = OpenAIClient(api_key=api_key)
     else:
@@ -131,24 +106,7 @@ def run_meadow(
         max_tokens=1000,
         temperature=0.0,
     )
-    user = EvalUserAgent(name="User", silent=False)
-    print("*************")
-    print("TEXT2SQL ONLY AGENT FLOW")
-    controller = get_simple_text2sql_agent(
-        user_agent=user,
-        client=client,
-        big_client=big_client,
-        llm_config=llm_config,
-        database=database,
-        overwrite_cache=False,
-    )
-    # Start the task
-    # asyncio.run(controller.initiate_chat(instruction))
-    print("*************")
-    print("FULL AGENT FLOW")
-    # Remake database so views from before are persistent
-    database = Database(connector)
-    # Now try full one
+    user = UserAgent(name="User", silent=False)
     controller = get_full_text2sql_agent(
         user_agent=user,
         client=client,

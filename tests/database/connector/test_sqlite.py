@@ -42,6 +42,11 @@ def test_sqlite_connector_init(sqlite_connector: SQLiteConnector) -> None:
     ), "Database file should be set correctly."
 
 
+def test_sqlite_quote(sqlite_connector: SQLiteConnector) -> None:
+    """Test quoting values for DuckDB."""
+    assert sqlite_connector.quote("test") == "'test'", "Value should be quoted."
+
+
 def test_sqlite_connector_connect(sqlite_connector: SQLiteConnector) -> None:
     """Test connection to SQLiteDB."""
     sqlite_connector.connect()
@@ -61,6 +66,10 @@ def test_sqlite_connector_get_tables(sqlite_connector: SQLiteConnector) -> None:
     assert len(table.columns) == 2, "There should be two columns."
     assert table.columns[0].name == "id", "First column should be 'id'."
     assert table.columns[1].name == "name", "Second column should be 'name'."
+    assert table.data == [
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "name": "Bob"},
+    ]
 
 
 @pytest.mark.parametrize(

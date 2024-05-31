@@ -40,7 +40,7 @@ def chat_completion() -> ChatCompletion:
                 logprobs=None,
                 message=ChatCompletionMessage(
                     content="This is a test.",
-                    role=ClientMessageRole.SENDER,
+                    role="assistant",
                     function_call=None,
                     tool_calls=None,
                 ),
@@ -66,7 +66,7 @@ def chat_tool_completion() -> ChatCompletion:
                 logprobs=None,
                 message=ChatCompletionMessage(
                     content=None,
-                    role=ClientMessageRole.SENDER,
+                    role="assistant",
                     function_call=None,
                     tool_calls=[
                         ChatCompletionMessageToolCall(
@@ -142,7 +142,7 @@ def test_convert_openai_to_response(
                 index=0,
                 message=ChatMessage(
                     content="This is a test.",
-                    role=ClientMessageRole.SENDER,
+                    role="assistant",
                     tool_calls=None,
                 ),
             )
@@ -161,7 +161,7 @@ def test_convert_openai_to_response(
                 index=0,
                 message=ChatMessage(
                     content=None,
-                    role=ClientMessageRole.SENDER,
+                    role="assistant",
                     tool_calls=[
                         ToolCall(
                             unparsed_arguments='{"question":"What is the total revenue by product category for the year 2021?"}',
@@ -186,7 +186,7 @@ async def test_arun_chat(
     """Test sending a chat request."""
     # make return value work with await expression
     mock_response = AsyncMock(return_value=chat_completion)
-    openai_client.client.chat.completions.create = mock_response
+    openai_client.client.chat.completions.create = mock_response  # type: ignore
     response = await openai_client.arun_chat(chat_request)
     openai_client.client.chat.completions.create.assert_called_once_with(
         **openai_client.convert_request_for_openai(chat_request)
@@ -199,7 +199,7 @@ async def test_arun_chat(
                 index=0,
                 message=ChatMessage(
                     content="This is a test.",
-                    role=ClientMessageRole.SENDER,
+                    role="assistant",
                     tool_calls=None,
                 ),
             )
