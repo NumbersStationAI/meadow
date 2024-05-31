@@ -17,6 +17,7 @@ colorama = "^0.4.6"
 sqlglot = "^23.12.1"
 termcolor = "^2.4.0"
 textdistance = "^4.6.2"
+pandas = "^2.2.2"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.1"
