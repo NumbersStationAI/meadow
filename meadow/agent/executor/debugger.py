@@ -4,8 +4,6 @@ import copy
 import logging
 from typing import Callable
 
-from termcolor import colored
-
 from meadow.agent.agent import Agent, AgentRole, ExecutorAgent, LLMAgentWithExecutors
 from meadow.agent.data_agents.text2sql_utils import (
     parse_and_run_sql_for_debugger,
@@ -159,7 +157,7 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
-        self._role = AgentRole.EXECUTOR
+        self._role = AgentRole.TASK_HANDLER
 
         if self._executors is None:
             # N.B. when an executor errors, it is that executor that gets resent a response
@@ -248,7 +246,6 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         """Send a message to another agent."""
         if not message:
             raise ValueError("Message is empty")
-        message.receiving_agent = recipient.name
         self._messages.add_message(
             agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
         )
@@ -279,7 +276,7 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         )
         await self.send(reply, sender)
 
-    async def generate_executed_reply(
+    async def generate_task_handler_reply(
         self,
         messages: list[AgentMessage],
         sender: Agent,
@@ -338,13 +335,6 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        print(self.system_message)
-        for msg in messages:
-            print(msg.role)
-            print(msg.content)
-            print("------")
-        print(colored(f"EMTPY RESULT AGENT CONTENT {content}", "blue"))
-        print("*****")
 
         return AgentMessage(
             content=content,
@@ -359,6 +349,6 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
         sender: Agent,
     ) -> AgentMessage:
         """Generate a reply based on the received messages."""
-        if self._role == AgentRole.EXECUTOR:
-            return await self.generate_executed_reply(messages, sender)
+        if self._role == AgentRole.TASK_HANDLER:
+            return await self.generate_task_handler_reply(messages, sender)
         return await self.generate_agent_reply(messages, sender)

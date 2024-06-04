@@ -11,7 +11,9 @@ from meadow.history.message_history import MessageHistory
 
 @pytest.fixture
 def mock_agent() -> Mock:
-    return Mock(spec=Agent)
+    agent = Mock(spec=Agent)
+    agent.name = "mock_agent"
+    return agent
 
 
 def assert_message_lists_equal(
@@ -41,7 +43,10 @@ def test_add_message(mock_agent: Mock) -> None:
     assert_message_lists_equal(message_history.get_messages(mock_agent), [message])
     # Adding another message
     another_message = AgentMessage(
-        content="Bye, world!", sending_agent="test", agent_role=ClientMessageRole.SENDER
+        content="Bye, world!",
+        sending_agent="test",
+        receiving_agent=mock_agent.name,
+        agent_role=ClientMessageRole.SENDER,
     )
     message_history.add_message(mock_agent, ClientMessageRole.SENDER, another_message)
     assert_message_lists_equal(
@@ -69,21 +74,26 @@ def test_get_all_messages_multiple_agents() -> None:
     """Test getting all messages with multiple agents."""
     message_history = MessageHistory()
     agent_one = Mock(spec=Agent)
+    agent_one.name = "agent_one"
     agent_two = Mock(spec=Agent)
+    agent_two.name = "agent_two"
     message_one = AgentMessage(
         content="Hello, world!",
         agent_role=ClientMessageRole.SENDER,
         sending_agent="agent_one",
+        receiving_agent=agent_one.name,
     )
     message_two = AgentMessage(
         content="Hello, world 2!",
         agent_role=ClientMessageRole.SENDER,
         sending_agent="agent_two",
+        receiving_agent=agent_two.name,
     )
     message_three = AgentMessage(
         content="Hello, world 3!",
         agent_role=ClientMessageRole.SENDER,
         sending_agent="agent_one",
+        receiving_agent=agent_one.name,
     )
 
     message_history.add_message(agent_one, ClientMessageRole.SENDER, message_one)
@@ -104,24 +114,31 @@ def test_get_messages_skip_exit() -> None:
     """Test getting all messages with multiple agents."""
     message_history = MessageHistory()
     agent_one = Mock(spec=Agent)
+    agent_one.name = "agent_one"
     message_one = AgentMessage(
         content="Hello, world!",
         agent_role=ClientMessageRole.SENDER,
         sending_agent="agent_one",
+        receiving_agent=agent_one.name,
     )
     message_two = AgentMessage(
-        content="I'm done", agent_role=ClientMessageRole.RECEIVER, sending_agent="user"
+        content="I'm done",
+        agent_role=ClientMessageRole.RECEIVER,
+        sending_agent="user",
+        receiving_agent=agent_one.name,
     )
     message_three = AgentMessage(
         content="See ya <exit>",
         agent_role=ClientMessageRole.SENDER,
         sending_agent="agent_one",
+        receiving_agent=agent_one.name,
         is_termination_message=True,
     )
     message_four = AgentMessage(
         content="Show me cats",
         agent_role=ClientMessageRole.RECEIVER,
         sending_agent="user",
+        receiving_agent=agent_one.name,
     )
 
     message_history.add_message(agent_one, ClientMessageRole.SENDER, message_one)
@@ -138,24 +155,30 @@ def test_copy_messages_from() -> None:
     """Test copying messages from one agent to another."""
     message_history = MessageHistory()
     agent_one = Mock(spec=Agent)
+    agent_one.name = "agent_one"
     agent_two = Mock(spec=Agent)
+    agent_two.name = "agent_two"
     message_one = AgentMessage(
         content="Hello, world!",
         agent_role=ClientMessageRole.SENDER,
         sending_agent="agent_one",
+        receiving_agent=agent_one.name,
     )
     message_two = AgentMessage(
         content="Bye, world!",
         agent_role=ClientMessageRole.RECEIVER,
         sending_agent="agent_one",
+        receiving_agent=agent_one.name,
     )
 
     message_history.add_message(agent_one, ClientMessageRole.SENDER, message_one)
     message_history.add_message(agent_one, ClientMessageRole.RECEIVER, message_two)
     message_history.copy_messages_from(agent_two, [message_one, message_two])
 
+    message_one.receiving_agent = agent_two.name
     assert_message_lists_equal(
-        message_history.get_messages(agent_two), [message_one, message_two]
+        message_history.get_messages(agent_two),
+        [message_one, message_two],
     )
 
 

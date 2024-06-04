@@ -56,7 +56,6 @@ class UserAgent(Agent):
         recipient: Agent,
     ) -> None:
         """Send a message to another agent."""
-        message.receiving_agent = recipient.name
         await recipient.receive(message, self)
 
     async def receive(

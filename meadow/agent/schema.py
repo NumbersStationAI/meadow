@@ -57,12 +57,12 @@ class AgentRole(enum.Enum):
     """Agent role.
 
     In conversations, an agent can either be a supervisor (i.e. the instigator
-    of the conversation) or the executor (i.e the responder). Some agents serve both
+    of the conversation) or the task handler (i.e the responder). Some agents serve both
     and their role determines how they respond.
     """
 
     SUPERVISOR = enum.auto()
-    EXECUTOR = enum.auto()
+    TASK_HANDLER = enum.auto()
 
 
 class AgentMessage(ChatMessage):

@@ -54,7 +54,7 @@ If the question is 'Find the top two companies by the number employees over the 
 The final attributes should be companies.name."""
 
 
-DEFAULT_SQL_PLAN_DESC = """This agent is expensive and takes as input a complex user question that often require numerous nested reasoning steps and outputs a plan to answer it. This agent should only be used sparingly for complex questions that have multiple steps and nested logic. The output of this agent **must** be used as input to another agent via {stepXX} tags.\nInput: a question or instruction that can be answered with a SQL query.\nOutput: a detailed plan for how to answer the SQL."""
+DEFAULT_SQL_PLAN_DESC = """This agent is expensive and takes as input a complex user question that often require numerous nested reasoning steps and outputs a plan to answer it. This agent should only be used sparingly for complex questions that have multiple steps and nested logic. The output of this agent **must** be used as input to another agent via {stepXX} tags."""
 
 
 class SQLPlannerAgent(LLMAgent):
@@ -131,7 +131,6 @@ class SQLPlannerAgent(LLMAgent):
         """Send a message to another agent."""
         if not message:
             raise ValueError("Message is empty")
-        message.receiving_agent = recipient.name
         self._messages.add_message(
             agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
         )

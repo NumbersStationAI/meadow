@@ -93,15 +93,6 @@ class ControllerAgent(Agent):
         if not message:
             logger.error("GOT EMPTY MESSAGE")
             raise ValueError("Message is empty")
-        # print(
-        #     colored(
-        #         f"IN SEND {self.name} (assistant role) WITH RECIPIENT {recipient.name}",
-        #         "red",
-        #     )
-        # )
-        # print("MESSAGE", message.content, "\n\nDISPLAY", message.display_content)
-        # print("-----")
-        message.receiving_agent = recipient.name
         self._messages.add_message(
             agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
         )
@@ -119,14 +110,6 @@ class ControllerAgent(Agent):
                 from_agent=sender.name,
                 to_agent=self.name,
             )
-        # update the message history
-        # print(
-        #     colored(
-        #         f"IN RECIEVE {self.name} (user role) WITH SENDER {sender.name}", "blue"
-        #     )
-        # )
-        # print("MESSAGE", message.content, "\n\nDISPLAY", message.display_content)
-        # print("-----")
         self._messages.add_message(
             agent=sender, agent_role=ClientMessageRole.RECEIVER, message=message
         )
@@ -143,7 +126,8 @@ class ControllerAgent(Agent):
         ):
             auto_response = AgentMessage(
                 content=Commands.NEXT,
-                sending_agent=self.name,
+                sending_agent=self._supervisor.name,
+                receiving_agent=self.name,
             )
             self._messages.add_message(
                 agent=self._supervisor,
@@ -192,7 +176,7 @@ class ControllerAgent(Agent):
                 )
                 self._supervisor.set_chat_role(AgentRole.SUPERVISOR)
                 executor_response = await sub_controller.initiate_chat(next_message)
-                self._supervisor.set_chat_role(AgentRole.EXECUTOR)
+                self._supervisor.set_chat_role(AgentRole.TASK_HANDLER)
 
                 next_message = executor_response.content
                 next_display = executor_response.display_content
@@ -268,7 +252,7 @@ class ControllerAgent(Agent):
                     last_message.content
                 )
                 last_message = executor_response.model_copy()
-                sender.set_chat_role(AgentRole.EXECUTOR)
+                sender.set_chat_role(AgentRole.TASK_HANDLER)
             # Finalize any temporary draft data views made and edited by the executors into final
             # views for the next step
             if self._can_solidify_drafts:
@@ -329,6 +313,7 @@ class ControllerAgent(Agent):
             agent_role=ClientMessageRole.RECEIVER,
             content=input,
             sending_agent=self._supervisor.name,
+            receiving_agent=self.name,
         )
         await self.receive(message, self._supervisor)
         # The last message send to the controller that isn't a NEXT or END
