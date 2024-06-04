@@ -1,9 +1,13 @@
-"""Agent that outputs the user desired attributes from a question."""
+"""Basic Agent."""
 
 import logging
 from typing import Callable
 
-from meadow.agent.agent import Agent, LLMAgent
+from meadow.agent.agent import (
+    Agent,
+    AgentRole,
+    LLMAgent,
+)
 from meadow.agent.schema import AgentMessage, ClientMessageRole
 from meadow.agent.utils import (
     generate_llm_reply,
@@ -17,44 +21,25 @@ from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ATTRIBUTE_PROMPT = """The user wants to answer an analytics question in SQL.
-
-Below is the data schema the user is working with.
+DEFAULT_PROMPT = """The user's schema is:
 {schema}
 
-Given the user's question, output exactly what are the final output attributes the user wants to see. They want the smallest set of attributes and prefer the most user friendly names (e.g. avoid ids and codes and attributes meant for joins).
+Please do you best to respond to the users comment or question."""
 
-For example, suppose the user is asking over a table with columns people(uid, name, last_name, age, country) and employment(eid, uid, cid, job, salary) and companies(cid, name, country).
-
-Question: Who is the youngest person in the US?
-Explanation: The user wants to know the person name from the people table of the person with the minimum age who is in the US country.
-Attributes: people.name
-
-Question: List the job and salary of the youngest employee?
-Explanation: The user wants to know the employment job and employment salary of the person with the minimum age from the people table.
-Attributes: employment.job, employment.salary
-
-Question: What is the average salary of people in the US and what company do they work for?
-Explanation: The user wants to know the average employment salary of people from the US country in the people table and the company name they work for.
-Attributes: AVG(employment.salary), companies.name
-
-Now output an explanation followed by the attributes the user wants to see for the following question:"""
+DEFAULT_DESC = "A catch all agent that can be used when no other agent makes sense."
 
 
-DEFAULT_ATTRIBUTE_DESC = "Augments the user question with desired attributes and outputs a new question to be used to generate the answer. The instruction to this agent should be a copy of the user question. The output of this agent should always be used downstream. Make the entire instruction be {stepXX} when using this agent's output."
-
-
-class AttributeDetectorAgent(LLMAgent):
-    """Agent that generates SQL queries from user questions."""
+class BasicAgent(LLMAgent):
+    """Agent that uses schema to answer any user comment."""
 
     def __init__(
         self,
         client: Client,
         llm_config: LLMConfig,
         database: Database,
-        name: str = "AttributeDetector",
-        description: str = DEFAULT_ATTRIBUTE_DESC,
-        system_prompt: str = DEFAULT_ATTRIBUTE_PROMPT,
+        name: str = "DefaultAgent",
+        description: str = DEFAULT_DESC,
+        system_prompt: str = DEFAULT_PROMPT,
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
@@ -70,6 +55,7 @@ class AttributeDetectorAgent(LLMAgent):
         self._llm_callback = llm_callback
         self._silent = silent
         self._messages = MessageHistory()
+        self._role = AgentRole.TASK_HANDLER
 
     @property
     def name(self) -> str:
@@ -167,10 +153,8 @@ class AttributeDetectorAgent(LLMAgent):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        content = content.split("Attributes:", 1)[-1].strip()
         return AgentMessage(
-            content=messages[-1].content
-            + f" The final attributes should be {content}.",
-            display_content=f"Selected Attributes: {content}",
+            content=content,
+            tool_calls=None,
             sending_agent=self.name,
         )

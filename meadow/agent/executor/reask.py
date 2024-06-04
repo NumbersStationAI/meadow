@@ -119,7 +119,6 @@ class ReaskExecutor(ExecutorAgent):
         """Send a message to another agent."""
         if not message:
             raise ValueError("Message is empty")
-        message.receiving_agent = recipient.name
         self._messages.add_message(
             agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
         )

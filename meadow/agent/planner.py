@@ -213,7 +213,7 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
         self._description = description
         self._system_prompt = system_prompt
         self._messages = MessageHistory()
-        self._role = AgentRole.EXECUTOR
+        self._role = AgentRole.TASK_HANDLER
         self._plan: Queue[SubTask] = Queue()
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
@@ -314,7 +314,6 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
         """Send a message to another agent."""
         if not message:
             raise ValueError("Message is empty")
-        message.receiving_agent = recipient.name
         self._messages.add_message(
             agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
         )
@@ -362,10 +361,6 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
-            # print(self.system_message)
-            print("QUESTION", messages[-1].content)
-            print("CONTENT PLANNER", content)
-            print("*****")
             if Commands.has_end(content):
                 return AgentMessage(
                     content=content,
@@ -398,7 +393,6 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                         for m in json.loads(parsed_plan_message.content)
                     ]
                     for sub_task in parsed_plan:
-                        print(sub_task.agent_name, "---", sub_task.prompt)
                         self._plan.put(
                             SubTask(
                                 agent=self._available_agents[sub_task.agent_name],

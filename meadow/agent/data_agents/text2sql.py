@@ -67,7 +67,7 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         self._llm_callback = llm_callback
         self._silent = silent
         self._messages = MessageHistory()
-        self._role = AgentRole.EXECUTOR
+        self._role = AgentRole.TASK_HANDLER
 
         if self._executors is None:
             self._executors = [
@@ -146,7 +146,6 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         """Send a message to another agent."""
         if not message:
             raise ValueError("Message is empty")
-        message.receiving_agent = recipient.name
         self._messages.add_message(
             agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
         )
@@ -190,7 +189,6 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
         ):
             messages_start_idx -= 2
         messages = messages[messages_start_idx:]
-        messages[0].content = messages[0].content
         chat_response = await generate_llm_reply(
             client=self.llm_client,
             messages=messages,
@@ -212,14 +210,6 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
                 content = content.replace("```sql", "<sql>").replace("```", "</sql>")
         if content.endswith("<end>") and "<sql" in content:
             content = content.replace("<end>", "")
-        if messages_start_idx < 1:
-            print(self.system_message)
-            for msg in messages:
-                print(msg.role)
-                print(msg.content)
-                print("---------")
-            print("SQL AGENT CONTENT", content)
-            print("*****")
         return AgentMessage(
             content=content,
             tool_calls=None,

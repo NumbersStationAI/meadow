@@ -11,7 +11,7 @@ lgger = logging.getLogger(__name__)
 
 COLOR_MAP = {
     "User": "yellow",
-    "Controller": "blue",
+    "Controller": "light_blue",
     "Planner": "red",
 }
 
@@ -24,7 +24,6 @@ AVAILABLE_COLORS = [
     "light_red",
     "light_green",
     "light_yellow",
-    "light_blue",
     "light_magenta",
     "light_cyan",
 ]

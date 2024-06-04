@@ -5,10 +5,10 @@ from meadow import Client
 from meadow.agent.controller import ControllerAgent
 from meadow.agent.data_agents.attribute_detector import AttributeDetectorAgent
 from meadow.agent.data_agents.schema_renamer import SchemaRenamerAgent
-from meadow.agent.data_agents.sql_planner import SQLPlannerAgent
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
 from meadow.agent.planner import PlannerAgent
 from meadow.agent.user import UserAgent
+from meadow.agent.utils import print_message
 from meadow.cache import DuckDBCache
 from meadow.client.api.anthropic import AnthropicClient
 from meadow.client.api.api_client import APIClient
@@ -26,15 +26,10 @@ def get_full_text2sql_agent(
     big_client: Client,
     llm_config: LLMConfig,
     database: Database,
+    auto_advance: bool,
     overwrite_cache: bool,
 ) -> ControllerAgent:
     """Get a full text2sql agent."""
-    sql_planner = SQLPlannerAgent(
-        client=client,
-        llm_config=llm_config,
-        database=database,
-        overwrite_cache=overwrite_cache,
-    )
     attribute_detector = AttributeDetectorAgent(
         client=client,
         llm_config=llm_config,
@@ -54,14 +49,18 @@ def get_full_text2sql_agent(
         overwrite_cache=overwrite_cache,
     )
     planner = PlannerAgent(
-        available_agents=[schema_cleaner, attribute_detector, sql_planner, text2sql],
+        available_agents=[schema_cleaner, attribute_detector, text2sql],
         client=big_client,
         llm_config=llm_config,
         database=database,
         overwrite_cache=overwrite_cache,
     )
     controller = ControllerAgent(
-        supervisor=user_agent, planner=planner, database=database, silent=True
+        supervisor=user_agent,
+        planner=planner,
+        database=database,
+        silent=True,
+        supervisor_auto_respond=auto_advance,
     )
     return controller
 
@@ -73,6 +72,7 @@ def run_meadow(
     db_path: str,
     model: str,
     instruction: str,
+    auto_advance: bool,
 ) -> None:
     """Main."""
     if not instruction:
@@ -113,9 +113,14 @@ def run_meadow(
         big_client=big_client,
         llm_config=llm_config,
         database=database,
+        auto_advance=auto_advance,
         overwrite_cache=False,
     )
     asyncio.run(controller.initiate_chat(instruction))
+    all_messages = controller.get_messages(user)
+    print("****FINAL MESSAGES TO/FROM USER****")
+    for msg in all_messages:
+        print_message(msg, msg.sending_agent, msg.receiving_agent)
 
 
 if __name__ == "__main__":
@@ -124,31 +129,36 @@ if __name__ == "__main__":
         "--api-provider",
         type=str,
         help="The API provider to use.",
-        default="anthropic",
+        default="openai",
     )
     argparser.add_argument(
         "--api-key",
         type=str,
         help="The API key to use.",
-        required=True,
+        default=None,
     )
     argparser.add_argument(
         "--db-type",
         type=str,
         help="The type od DB: duckdb or sqlite.",
-        default="duckdb",
+        default="sqlite",
     )
     argparser.add_argument(
         "--db-path",
         type=str,
         help="The path to the database.",
-        default="examples/sales_example.duckdb",
+        default="examples/data/database_sqlite/sales_ambiguous_joins_example/sales_ambiguous_joins_example.sqlite",
     )
     argparser.add_argument(
         "--model",
         type=str,
         help="Anthropic model.",
-        default="claude-3-haiku-20240307",
+        default="gpt-4o",
+    )
+    argparser.add_argument(
+        "--auto-advance",
+        action="store_true",
+        help="Automatically advance the conversation.",
     )
     argparser.add_argument(
         "--instruction",
@@ -164,4 +174,5 @@ if __name__ == "__main__":
         args.db_path,
         args.model,
         args.instruction,
+        args.auto_advance,
     )

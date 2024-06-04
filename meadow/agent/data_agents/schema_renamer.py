@@ -103,7 +103,8 @@ def parse_rename_and_update_db(
         )
 
     return AgentMessage(
-        content="The schema has been updated.",
+        content="The schema has been updated",
+        display_content=f"The schema has been updated:\n{json.dumps(content, indent=2)}",
         sending_agent=input.agent_name,
     )
 
@@ -138,7 +139,7 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
         self._llm_callback = llm_callback
         self._silent = silent
         self._messages = MessageHistory()
-        self._role = AgentRole.EXECUTOR
+        self._role = AgentRole.TASK_HANDLER
 
         if self._executors is None:
             self._executors = [
@@ -209,7 +210,6 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
         """Send a message to another agent."""
         if not message:
             raise ValueError("Message is empty")
-        message.receiving_agent = recipient.name
         self._messages.add_message(
             agent=recipient, agent_role=ClientMessageRole.SENDER, message=message
         )
@@ -257,11 +257,6 @@ class SchemaRenamerAgent(LLMAgentWithExecutors):
             overwrite_cache=self._overwrite_cache,
         )
         content = chat_response.choices[0].message.content
-        print("CLEANER")
-        print(messages[-1].content)
-        print("RESOPNSE")
-        print(content)
-        print("-----")
         return AgentMessage(
             content=content,
             sending_agent=self.name,

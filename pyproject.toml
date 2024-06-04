@@ -18,6 +18,7 @@ sqlglot = "^23.12.1"
 termcolor = "^2.4.0"
 textdistance = "^4.6.2"
 pandas = "^2.2.2"
+ipdb = "^0.13.13"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.1"
@@ -42,7 +43,11 @@ strict_optional = false
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
-module = []
+module = [
+  "jinja2.*",
+  "click.*",
+  "rich.*",
+]
 
 [tool.ruff]
 exclude = ["experiments"]

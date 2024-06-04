@@ -36,6 +36,8 @@ class MessageHistory:
             self._history[agent] = []
         # make a copy of the message to avoid modifying the original
         message = message.model_copy()
+        if agent_role == ClientMessageRole.SENDER:
+            message.receiving_agent = agent.name
         message.agent_role = agent_role
         # Set the role of the message. This typically happens internally
         message.role = agent_role.value

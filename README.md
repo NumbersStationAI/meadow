@@ -1,5 +1,5 @@
 # Meadow
-Framework for building data agent workflows
+A framework for building multi-agent data workflows with LLMs with interactive user feedback.
 
 > I like to think (and the sooner the better!) of a cybernetic meadow where mammals and computers live together in mutually programming harmony like pure water touching clear sky.
 >
@@ -25,26 +25,77 @@ cd meadow
 make install
 ```
 
-### DuckDB (optional)
-If you want to load some sample data in `examples/data`, you will need `duckdb`. To get the executable, go to [here](https://duckdb.org/docs/installation). Then run the following. You can replace the filename with anything you want.
+## Loading Data
+If you want to load our sample data (required for the benchmark) in `examples/data`, you will need `sqlite3`. To load the clean data, run
 
 ```bash
 cd meadow/examples/data
-duckdb sales_example.duckdb
-.read sales.sql
-.exit
+sqlite3 database_sqlite/sales_example/sales_example.sqlite < sales.sql
 ```
 
-# Demo Run
-To get started with a simple usecase using text2sql on a duckdb database, we have `examples/demo.py` to run. You will need an Anthropic API key.
+And to load the ambiguous data (also needed for benchmark), run
+```bash
+cd meadow/examples/data
+sqlite3 database_sqlite/sales_ambiguous_joins_example/sales_ambiguous_joins_example.sqlite < sales_ambiguous_joins.sql
+```
+
+# Running
+
+## Commands
+Meadow is a plan-then-execute framework where a planner generates a sequence of sub-tasks for a collection of agents to solve based on the user's high level goal. Each each point in the plan, Meadow will return the current sub-task output to the user for feedback. The user can enter one of three things:
+
+1. A text response of feedback for what to change.
+2. '<next>' string which indicates the user is happy with the output and ready to move on.
+3. '<end>' string which indicates the user wants to terminate the conversation.
+
+Meadow supports auto-advance which means the feedback is always '<next>'.
+
+## Text-to-SQL Use Case
+To get started with a simple use case using text-to-SQL on a sqlite3 database, we have `examples/demo.py` to run. This use case has three main task agents: a attribute detector, a schema cleaner, and a text-to-SQL agent. Note, you will need an OpenAI API key or have it set as an environment variable.
 ```bash
 poetry run python examples/demo.py \
   --api-key API_KEY \
-  --duckdb-file examples/data/sales_example.duckdb \
-  --instruction Find\ the\ top\ 5\ most\ popular\ products\ fro
-m\ the\ customers\ who\ order\ the\ most\ pantry\ items.
+  --db-path examples/data/database_sqlite/sales_example/sales_example.sqlite
 ```
-If you don't give an instruction, you will be prompted for one at the start.
+
+If you want to auto-advance instead of giving feedback, add the flag `--auto-advance`.
+
+## Customzing Agents
+To see an example of how you can build your own data agents, see [new_agent.ipynb](examples/notebookes/new_agent.ipynb). This notebook will walk you through loading up the existing text-to-SQL pipeline, adding an agent that explains the response, and asking SQL questions.
 
 # Meadow Framework
-TBD
+Meadow is a framework for building multi-agent workflows to solve data tasks with LLMs. Customizable agents all share access to a data layer and converse to solve a task with optional user feedback along the way. Meadow provides:
+
+* A shared data layer to allow agents to solve data tasks and communicate updates to downstream tasks.
+* Specialized executor agents that allow for iterative debugging against the data.
+* Data-aware planners that break down complex data tasks into sub-tasks based on the available agents.
+* A user agent that can give feedback and control the flow of the planned exection with a simple set of keyword commands.
+
+## Chat Flow
+Meadow is a plan-then-execute framework where a planner generates a sequence of sub-tasks for a collection of agents to solve based on the user's high level goal. At any point in time, there are two agents communicating to complete a sub-task. During this two agent communication, one agent is designated the `Supervisor` and is the one that initiates the task and provides feedback. The other agent is the `Task Handler` that performs the task. Very often, the user is the supervisor and an LLM-backed agent is the task handler.
+
+## Agents
+The core abstraction of Meadow is the [`Agent`](meadow/agent/agent.py) that must implement three methods: to send a message to another agent, to receive a message from another agent, and to generate a reply. An agent does not need to be based on a LLM, e.g. a user agent, but it often is.
+
+An agent can be extended in three possible ways:
+
+1. `PlannerAgent`: The agent must have a collection of agents it can coordinate between and must be able to move through a plan linearly. Planner agents can be hierarchical in that one planner agent can have another planner agent as one of its available agents to coordinate between.
+2. `ExecutorAgent`: The agent must have an execution function that parses a message from another agent. The role of the executor is to catch bugs and throw back error messages upon mistakes.
+3. `AgentWithExecutors`: This is an agent that has an associated executor agent that must executor on this agent's output. When an agent has an executor, a sub-chat is initiated between the agent and its executor so the executor and agent can debug if desired.
+
+Agents can be extended in multiple ways, e.g., an agent can be both an executor agent and have its own executors.
+
+### Controller
+There is one special non-LLM agent in Meadow called the [`Controller`](meadow/agent/controller.py). The controller is determinisitc and has three main functions:
+
+1. It is the mediator between any conversation between two agents. It sends and receives messages and stores the message noversation history for ease of access and observability.
+2. It implements and understands the [`Commands`](meadow/agent/schema.py) sent by the supervisor to move through a plan.
+3. It can start new chats between two agents. E.g. it initiates the chat between an agent and its executor as a "branch" off of the main chat. Once the sub-chat terminates, the main chat can continue.
+
+## Data Layer
+All agents have access to a [`Database`](meadow/database/database.py) that is a view over the user's data. The database allows agents to retrieve information via SQL queries as well as create views over the data. Each view that is created is shared to other agents solving the task.
+
+We support backend databases connected to [SQLite](https://sqlite.org/) or [DuckDB](https://duckdb.org/).
+
+## LLM Client
+We support a simple LLM wrapper client that supports sending a chat requiest to various LLMs. The client integrates with a caching layer for faster and cheaper reruns of the same inputs. We currently support [OpenAI](https://platform.openai.com/docs/overview) and [Anthropic](https://www.anthropic.com/api).
