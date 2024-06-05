@@ -99,3 +99,24 @@ We support backend databases connected to [SQLite](https://sqlite.org/) or [Duck
 
 ## LLM Client
 We support a simple LLM wrapper client that supports sending a chat requiest to various LLMs. The client integrates with a caching layer for faster and cheaper reruns of the same inputs. We currently support [OpenAI](https://platform.openai.com/docs/overview) and [Anthropic](https://www.anthropic.com/api).
+
+# Acknowledge
+We'd like to thank the follow packages for inspiring and helping Meadow.
+
+* [AutoGen](https://github.com/microsoft/autogen)
+* [MetaGPT](https://github.com/geekan/MetaGPT)
+* [AgentVerse](https://github.com/OpenBMB/AgentVerse/tree/main)
+
+# Contact and Cite
+For any questions or comments, please leave an Issue or email `laurel.orr@numbersstation.ai`.
+
+To cite
+```
+@misc{orr2024meadow,
+  author = {Orr, Laurel and Chami, Ines},
+  title = {Meadow},
+  year = {2024},
+  publisher = {GitHub},
+  howpublished = {\url{https://github.com/NumbersStationAI/meadow}},
+}
+```
