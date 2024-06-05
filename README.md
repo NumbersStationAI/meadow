@@ -45,10 +45,10 @@ sqlite3 database_sqlite/sales_ambiguous_joins_example/sales_ambiguous_joins_exam
 Meadow is a plan-then-execute framework where a planner generates a sequence of sub-tasks for a collection of agents to solve based on the user's high level goal. Each each point in the plan, Meadow will return the current sub-task output to the user for feedback. The user can enter one of three things:
 
 1. A text response of feedback for what to change.
-2. '<next>' string which indicates the user is happy with the output and ready to move on.
-3. '<end>' string which indicates the user wants to terminate the conversation.
+2. '\<next\>' string which indicates the user is happy with the output and ready to move on.
+3. '\<end\>' string which indicates the user wants to terminate the conversation.
 
-Meadow supports auto-advance which means the feedback is always '<next>'.
+Meadow supports auto-advance which means the feedback is always '\<next\>'.
 
 ## Text-to-SQL Use Case
 To get started with a simple use case using text-to-SQL on a sqlite3 database, we have `examples/demo.py` to run. This use case has three main task agents: a attribute detector, a schema cleaner, and a text-to-SQL agent. Note, you will need an OpenAI API key or have it set as an environment variable.
