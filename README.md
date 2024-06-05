@@ -41,7 +41,7 @@ sqlite3 database_sqlite/sales_ambiguous_joins_example/sales_ambiguous_joins_exam
 
 # Running
 
-## Commands
+## Commands (Interactive)
 Meadow is a plan-then-execute framework where a planner generates a sequence of sub-tasks for a collection of agents to solve based on the user's high level goal. Each each point in the plan, Meadow will return the current sub-task output to the user for feedback. The user can enter one of three things:
 
 1. A text response of feedback for what to change.
@@ -51,7 +51,7 @@ Meadow is a plan-then-execute framework where a planner generates a sequence of 
 Meadow supports auto-advance which means the feedback is always '\<next\>'.
 
 ## Text-to-SQL Use Case
-To get started with a simple use case using text-to-SQL on a sqlite3 database, we have `examples/demo.py` to run. This use case has three main task agents: a attribute detector, a schema cleaner, and a text-to-SQL agent. Note, you will need an OpenAI API key or have it set as an environment variable.
+To get started with a simple, interactive use case using text-to-SQL on a sqlite3 database, we have `examples/demo.py` to run. This use case has three main task agents: a attribute detector, a schema cleaner, and a text-to-SQL agent. Note, you will need an OpenAI API key or have it set as an environment variable.
 ```bash
 poetry run python examples/demo.py \
   --api-key API_KEY \
@@ -59,6 +59,57 @@ poetry run python examples/demo.py \
 ```
 
 If you want to auto-advance instead of giving feedback, add the flag `--auto-advance`.
+
+## Benchmark
+To repo results from our custom 50 question text-to-SQL benchmark, run
+```bash
+poetry run experiments/text2sql/predict.py predict \
+  examples/data/custom_text2sql_benchmark.json \
+  examples/data/sales_example_schema.json \
+  examples/data/database_sqlite \
+  --output-dir experiments/text2sql/predictions \
+  --client-cache-path test_custom_cache.duckdb \
+  --use-table-schema \
+  --api-provider openai \
+  --planner-api-provider openai \
+  --api-key <OPEN_AI_API_KEY> \
+  --planner-api-key <OPEN_AI_API_KEY> \
+  --model gpt-4o \
+  --planner-model gpt-4o \
+  --num-run 50 \
+  --num-print 0 \
+  --add-reask \
+  --add-empty-table \
+  --add-attribute-selector \
+  --add-schema-cleaner \
+  --async-batch-size 20
+```
+make sure to setup the sqlite database in the instructions above (you will need both databases setup).
+
+You can evaluate the results by first running
+```bash
+cd experiments/text2sql/
+mkdir metrics
+cd metrics
+git clone git@github.com:ElementAI/test-suite-sql-eval.git test_suite_sql_eval
+cd ../../..
+```
+to download spider evaluation code.
+
+Then running
+```bash
+poetry run python3 experiments/text2sql/evaluate.py evaluate \         
+  --gold examples/data/custom_text2sql_benchmark.json \
+  --db examples/data/database_sqlite \
+  --tables examples/data/sales_example_schema.json \
+  --output-dir experiments/text2sql/predictions \
+  --client-cache-path test_custom_cache.duckdb \
+  --api-key <OPEN_AI_API_KEY> \
+  --model gpt-4o \
+  --pred <PREDICTION_FILE_FROM_ABOVE>
+```
+
+The same script can be used to run [Spider](https://yale-lily.github.io/spider) V1 eval numbers. V2 is coming soon!
 
 ## Customzing Agents
 To see an example of how you can build your own data agents, see [new_agent.ipynb](examples/notebookes/new_agent.ipynb). This notebook will walk you through loading up the existing text-to-SQL pipeline, adding an agent that explains the response, and asking SQL questions.

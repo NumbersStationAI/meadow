@@ -19,6 +19,8 @@ termcolor = "^2.4.0"
 textdistance = "^4.6.2"
 pandas = "^2.2.2"
 ipdb = "^0.13.13"
+click = "^8.1.7"
+rich = "^13.7.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.1"
@@ -45,8 +47,7 @@ strict_optional = false
 ignore_missing_imports = true
 module = [
   "jinja2.*",
-  "click.*",
-  "rich.*",
+  "attr.*",
 ]
 
 [tool.ruff]
