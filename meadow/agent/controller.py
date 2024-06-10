@@ -257,6 +257,15 @@ class ControllerAgent(Agent):
             # views for the next step
             if self._can_solidify_drafts:
                 self.database.finalize_draft_views()
+            # Add the last message from the sender with the final response. This is needed if we
+            # meed to retrieve the final response from sender to use later on in the plan.
+            self._messages.add_message(
+                agent=sender,
+                agent_role=ClientMessageRole.RECEIVER,
+                message=last_message,
+            )
+            # Adding subcontroller message history in case need to query it later
+            self.add_to_messages(sub_controller, sub_controller.get_messages(sender))
         final_response = last_message or default_response
         # The current_task_agent is the agent of the task that is currently answering the user's
         # question. current_agent is whoever we last chatted with. When a user responds, current_agent
