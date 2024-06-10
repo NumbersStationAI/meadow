@@ -9,6 +9,8 @@ A framework for building multi-agent data workflows with LLMs with interactive u
 <img src="assets/meadow_image.png" alt="Cybernetic Meadow"/>
 </p>
 
+Check out our [blog post](https://numbersstation.ai/introducing-meadow-llm-agents-for-data-tasks/) announcing Meadow.
+
 # Setup
 ## Install
 ### Poetry
