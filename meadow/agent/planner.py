@@ -361,6 +361,7 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
+            print("FINAL PLAN", content)
             if Commands.has_end(content):
                 return AgentMessage(
                     content=content,

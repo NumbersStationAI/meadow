@@ -296,6 +296,11 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
             can_reask_again=can_reask_again,
         )
         parsed_response = self.execution_func(execution_func_input)
+        if not can_reask_again:
+            # This is the final response to the supervisor so set response to False
+            parsed_response.requires_response = False
+            parsed_response.requires_execution = False
+            return parsed_response
         if parsed_response.requires_response:
             # Adding the data to the schema for the debugger makes it often think it's seeing the entire table
             # and make mistakes wrt filters. Better to leave the data out.
@@ -307,11 +312,6 @@ class DebuggerExecutor(ExecutorAgent, LLMAgentWithExecutors):
             messages[0].content = error_message
             messages[0].display_content = error_message
             return await self.generate_agent_reply(messages, sender)
-        if not can_reask_again:
-            # This is the final response to the supervisor so set response to False
-            parsed_response.requires_response = False
-            parsed_response.requires_execution = False
-            return parsed_response
         self._current_execution_attempts += 1
         return parsed_response
 

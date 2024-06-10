@@ -1,72 +1,59 @@
-"""Basic Agent."""
+"""Executor agent for user feedback."""
 
 import logging
 from typing import Callable
 
-from meadow.agent.agent import (
-    Agent,
-    AgentRole,
-    ExecutorAgent,
-    LLMAgentWithExecutors,
-)
-from meadow.agent.schema import AgentMessage, ClientMessageRole
+from meadow.agent.agent import Agent, ExecutorAgent
+from meadow.agent.schema import AgentMessage, ClientMessageRole, ExecutorFunctionInput
 from meadow.agent.utils import (
-    generate_llm_reply,
     print_message,
 )
 from meadow.client.client import Client
 from meadow.client.schema import LLMConfig
 from meadow.database.database import Database
-from meadow.database.serializer import serialize_as_list
 from meadow.history.message_history import MessageHistory
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROMPT = """The user's schema is:
-{schema}
-
-Please do you best to respond to the users comment or question."""
-
-DEFAULT_DESC = "A catch all agent that can be used when no other agent makes sense."
+DEFAULT_USERFEEDBACK_DESC = (
+    "Provides targeted feedback to model responses when model needs it."
+)
 
 
-class BasicAgent(LLMAgentWithExecutors):
-    """Agent that uses schema to answer any user comment."""
+class UserFeedbackExecutor(ExecutorAgent):
+    """Executor that calls out to a user if asked."""
 
     def __init__(
         self,
         client: Client,
         llm_config: LLMConfig,
         database: Database,
-        executors: list[ExecutorAgent] = None,
-        name: str = "DefaultAgent",  # Should be overridden when creating
-        description: str = DEFAULT_DESC,
-        system_prompt: str = DEFAULT_PROMPT,
+        execution_func: Callable[[ExecutorFunctionInput], AgentMessage],
+        max_execution_attempts: int = 2,
+        description: str = DEFAULT_USERFEEDBACK_DESC,
+        system_prompt: str = None,
         overwrite_cache: bool = False,
         silent: bool = True,
         llm_callback: Callable = None,
     ):
-        """Initialize the SQL generator agent."""
+        """Initialize the planner agent."""
         self._client = client
         self._llm_config = llm_config
         self._database = database
-        self._executors = executors
-        self._name = name
+        self._execution_func = execution_func
+        self._max_execution_attempts = max_execution_attempts
+        self._current_execution_attempts = 0
         self._description = description
         self._system_prompt = system_prompt
+        self._messages = MessageHistory()
         self._overwrite_cache = overwrite_cache
         self._llm_callback = llm_callback
         self._silent = silent
-        self._messages = MessageHistory()
-        self._role = AgentRole.TASK_HANDLER
-
-        if self._executors is None:
-            self._executors = []
 
     @property
     def name(self) -> str:
         """Get the name of the agent."""
-        return self._name
+        return f"{self._execution_func.__name__}_UserFeedback_Executor"
 
     @property
     def description(self) -> str:
@@ -74,33 +61,25 @@ class BasicAgent(LLMAgentWithExecutors):
         return self._description
 
     @property
+    def execution_func(
+        self,
+    ) -> Callable[[ExecutorFunctionInput], AgentMessage]:
+        """The execution function of this agent."""
+        return self._execution_func
+
+    @property
     def llm_client(self) -> Client:
         """The LLM client of this agent."""
         return self._client
 
     @property
-    def database(self) -> Database:
-        """The database used by the agent."""
-        return self._database
-
-    @property
     def system_message(self) -> str:
         """Get the system message."""
-        serialized_schema = serialize_as_list(self.database.tables)
-        return self._system_prompt.format(
-            schema=serialized_schema,
-        )
+        return self._system_prompt
 
-    def set_chat_role(self, role: AgentRole) -> None:
-        """Set the chat role of the agent.
-
-        Only used for agents that have executors."""
-        self._role = role
-
-    @property
-    def executors(self) -> list[ExecutorAgent] | None:
-        """The executor agents that should be used by this agent."""
-        return self._executors
+    def reset_execution_attempts(self) -> None:
+        """Reset the number of execution attempts."""
+        self._current_execution_attempts = 0
 
     def get_messages(self, chat_agent: "Agent") -> list[AgentMessage]:
         """Get the messages between self and the chat_agent."""
@@ -135,6 +114,10 @@ class BasicAgent(LLMAgentWithExecutors):
         sender: Agent,
     ) -> None:
         """Receive a message from another agent."""
+        if self.execution_func is None:
+            raise ValueError(
+                "Execution function is not set. Executor must have an execution function."
+            )
         if not self._silent:
             print_message(
                 message,
@@ -155,24 +138,37 @@ class BasicAgent(LLMAgentWithExecutors):
         messages: list[AgentMessage],
         sender: Agent,
     ) -> AgentMessage:
-        """Generate a reply when Executor agent."""
-        chat_response = await generate_llm_reply(
-            client=self.llm_client,
+        """Generate the reply when acting as the Executor for an Agent."""
+        if self.execution_func is None:
+            raise ValueError(
+                "Execution function is not set. Executor must have an execution function."
+            )
+        can_reask_again = (
+            self._current_execution_attempts < self._max_execution_attempts
+        )
+        execution_func_input = ExecutorFunctionInput(
             messages=messages,
-            tools=[],
-            system_message=AgentMessage(
-                agent_role=ClientMessageRole.SYSTEM,
-                content=self.system_message,
+            agent_name=self.name,
+            database=self._database,
+            can_reask_again=can_reask_again,
+        )
+        parsed_response = self.execution_func(execution_func_input)
+        if not can_reask_again:
+            # This is the final response to the supervisor so set response to False
+            parsed_response.requires_response = False
+            parsed_response.requires_execution = False
+            return parsed_response
+        if parsed_response.requires_response:
+            print_message(
+                parsed_response,
+                from_agent=sender.name,
+                to_agent=self.name,
+            )
+            content = input(">>> ")
+            return AgentMessage(
+                content=content,
                 sending_agent=self.name,
-            ),
-            llm_config=self._llm_config,
-            llm_callback=self._llm_callback,
-            overwrite_cache=self._overwrite_cache,
-        )
-        content = chat_response.choices[0].message.content
-        return AgentMessage(
-            content=content,
-            tool_calls=None,
-            sending_agent=self.name,
-            requires_execution=(self.executors is not None and len(self.executors) > 0),
-        )
+                requires_response=True,
+            )
+        self._current_execution_attempts += 1
+        return parsed_response
