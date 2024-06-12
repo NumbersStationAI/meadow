@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from meadow.agent.agent import Agent
 from meadow.agent.controller import ControllerAgent
 from meadow.agent.data_agents.attribute_detector import AttributeDetectorAgent
+from meadow.agent.data_agents.planner_constraints import attribute_detector_constraints, sql_agent_constraints
 from meadow.agent.data_agents.schema_renamer import SchemaRenamerAgent
 from meadow.agent.data_agents.sql_decomposer import SQLDecomposerAgent
 from meadow.agent.data_agents.sql_planner import SQLPlannerAgent
@@ -198,6 +199,7 @@ def get_text2sql_agent(
         client=None if len(agents) == 1 else client,
         llm_config=llm_config,
         database=database,
+        constraints=[attribute_detector_constraints, sql_agent_constraints],
         overwrite_cache=overwrite_cache,
         llm_callback=callback_planner,
     )

@@ -113,6 +113,7 @@ def parse_steps(input_str: str) -> list[tuple[str, str]]:
 def parse_plan(
     input: ExecutorFunctionInput,
     available_agents: dict[str, Agent],
+    constraints: list[Callable[[list[SubTask], str], str | None]],
 ) -> AgentMessage:
     """Extract the plan from the response.
 
@@ -127,6 +128,7 @@ def parse_plan(
     """
     error_message = None
     message = input.messages[-1].content
+    userinput = re.search(r"<userinput>(.*?)</userinput>", message, re.DOTALL).group(1)
     if message.endswith("</steps"):
         message += ">"
     if "<steps>" not in message:
@@ -134,38 +136,27 @@ def parse_plan(
     if not error_message:
         inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
         parsed_steps = parse_steps(inner_steps)
-        plan: list[SubTaskForParse] = []
-        # TODO: how to craft better planner rules?
         for agent, instruction in parsed_steps:
             if agent not in available_agents:
                 error_message = f"Agent {agent} not found in available agents. Please only use {', '.join(available_agents.keys())}."
-            if not error_message and (
-                agent == "AttributeDetector" and "{" in instruction
-            ):
-                error_message = f"AttributeDetector agent cannot have any replacement tags in the instruction. instruction={instruction}."
-            if not error_message and (
-                agent == "SQLGenerator"
-                and "SQLGenerator" in [p.agent_name for p in plan]
-            ):
-                error_message = "SQLGenerator agent can only be used once. Please rewrite to just have a single <agent>SQLGenerator</agent> in the plan."
-            if not error_message:
-                plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
-
-        if not error_message:
-            for i, p in enumerate(plan):
-                if p.agent_name == "SQLPlanner" and not any(
-                    f"{{step{i + 1}}}" in p.prompt for p in plan
-                ):
-                    error_message = f"SQLPlanner agent's output must be used in a future step, but it is not. Please either remove the SQLPlanner or use it's output via {{step{i + 1}}}."
-
-        if not error_message:
-            try:
-                plan = swap_instruction_replacements_with_agent_names(plan)
-            except Exception as e:
-                error_message = (
-                    f"Error swapping instruction replacements with agent names. e={e}"
-                )
-
+                break
+    if not error_message:
+        parsed_plan: list[SubTaskForParse] = []
+        plan: list[SubTask] = []
+        for agent, instruction in parsed_steps:
+            parsed_plan.append(SubTaskForParse(agent_name=agent, prompt=instruction))
+            plan.append(SubTask(agent=available_agents[agent], prompt=instruction))
+        for constraint in constraints:
+            error_message = constraint(plan, userinput)
+            if error_message:
+                break
+    if not error_message:
+        try:
+            parsed_plan = swap_instruction_replacements_with_agent_names(parsed_plan)
+        except Exception as e:
+            error_message = (
+                f"Error swapping instruction replacements with agent names. e={e}"
+            )
     if error_message:
         if input.can_reask_again:
             return AgentMessage(
@@ -178,9 +169,8 @@ def parse_plan(
                 content=f"Current plan.\n\n{message}\n\nWe're having trouble generating a plan. Please try to rephrase.",
                 sending_agent=input.agent_name,
             )
-
     return AgentMessage(
-        content=json.dumps([m.model_dump() for m in plan]),
+        content=json.dumps([m.model_dump() for m in parsed_plan]),
         display_content=inner_steps,
         sending_agent=input.agent_name,
     )
@@ -196,6 +186,7 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
         llm_config: LLMConfig | None,
         database: Database | None,
         executors: list[ExecutorAgent] = None,
+        constraints: list[Callable[[list[SubTask], str], str | None]] = [],
         name: str = "Planner",
         description: str = "Generates a plan for a task.",
         system_prompt: str = DEFAULT_PLANNER_PROMPT,
@@ -209,6 +200,7 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
         self._llm_config = llm_config
         self._database = database
         self._executors = executors
+        self._constraints = constraints
         self._name = name
         self._description = description
         self._system_prompt = system_prompt
@@ -226,7 +218,13 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                     llm_config=None,
                     database=self._database,
                     execution_func=partial(
-                        parse_plan, available_agents=self._available_agents
+                        parse_plan,
+                        available_agents=self.available_agents,
+                        constraints=self.plan_constraints,
+                    ),
+                    # More execution attempts for more constraints
+                    max_execution_attempts=max(
+                        int(len(self._constraints or []) * 1.3), 2
                     ),
                     llm_callback=self._llm_callback,
                 )
@@ -278,6 +276,11 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
     def available_agents(self) -> dict[str, Agent]:
         """Get the available agents."""
         return self._available_agents
+
+    @property
+    def plan_constraints(self) -> list[Callable[[list[SubTask], str], str | None]]:
+        """Get the constraints for the planner."""
+        return self._constraints
 
     def move_to_next_agent(
         self,
@@ -361,7 +364,8 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                 overwrite_cache=self._overwrite_cache,
             )
             content = chat_response.choices[0].message.content
-            print("FINAL PLAN", content)
+            # Add back user input for use in the plan parsing constraints
+            content = f"<userinput>{messages[0].content}</userinput>\n{content}"
             if Commands.has_end(content):
                 return AgentMessage(
                     content=content,
@@ -386,7 +390,8 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                         database=self._database,
                         can_reask_again=True,
                     ),
-                    available_agents=self._available_agents,
+                    available_agents=self.available_agents,
+                    constraints=self.plan_constraints,
                 )
                 try:
                     parsed_plan = [
@@ -400,8 +405,7 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
                                 prompt=sub_task.prompt,
                             )
                         )
-                except Exception as e:
-                    logger.warning(f"Error in planner. e={e}")
+                except Exception:
                     pass
                 return AgentMessage(
                     content=content,

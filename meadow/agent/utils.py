@@ -41,7 +41,7 @@ def print_message(message: AgentMessage, from_agent: str, to_agent: str) -> None
         # Add a default color
         color = AVAILABLE_COLORS.pop(0)
         COLOR_MAP[from_agent] = color
-    to_print = f"{from_agent} -> {to_agent}: {content}"
+    to_print = f"{from_agent} -> {to_agent}:\n{content}"
     print(colored(to_print, color))  # type: ignore
 
 

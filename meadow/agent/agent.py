@@ -122,6 +122,12 @@ class LLMPlannerAgent(LLMAgent):
         """Get the available agents."""
         raise NotImplementedError
 
+    @property
+    @abstractmethod
+    def plan_constraints(self) -> list[Callable[[list[SubTask], str], str | None]]:
+        """Get the plan constraints."""
+        raise NotImplementedError
+
     @abstractmethod
     def move_to_next_agent(self) -> "SubTask":
         """Move to the next agent in the task plan."""
