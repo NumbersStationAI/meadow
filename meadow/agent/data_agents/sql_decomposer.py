@@ -277,9 +277,6 @@ class SQLDecomposerAgent(LLMPlannerAgent):
                             )
                         )
                 except Exception as e:
-                    logger.warning(
-                        f"Error in parsing plan. Ignoring as executor should throw error back to fix. e={e}, message={content}."
-                    )
                     raise e
                 return AgentMessage(
                     content=content,

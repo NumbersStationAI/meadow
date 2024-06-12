@@ -4,6 +4,10 @@ import asyncio
 from meadow import Client
 from meadow.agent.controller import ControllerAgent
 from meadow.agent.data_agents.attribute_detector import AttributeDetectorAgent
+from meadow.agent.data_agents.planner_constraints import (
+    attribute_detector_constraints,
+    sql_agent_constraints,
+)
 from meadow.agent.data_agents.schema_renamer import SchemaRenamerAgent
 from meadow.agent.data_agents.text2sql import SQLGeneratorAgent
 from meadow.agent.planner import PlannerAgent
@@ -53,6 +57,7 @@ def get_full_text2sql_agent(
         client=big_client,
         llm_config=llm_config,
         database=database,
+        constraints=[attribute_detector_constraints, sql_agent_constraints],
         overwrite_cache=overwrite_cache,
     )
     controller = ControllerAgent(
