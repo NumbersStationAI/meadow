@@ -2,6 +2,7 @@
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -46,9 +47,9 @@ class SQLiteConnector(Connector):
         """Run an SQL query."""
         return pd.read_sql_query(sql, self.conn)
 
-    def execute_sql(self, sql: str) -> None:
+    def execute_sql(self, sql: str, parameters: Any = None) -> None:
         """Run the SQL without returning anything."""
-        self.conn.execute(sql)
+        self.conn.execute(sql, parameters=parameters)  # type: ignore
         self.commit()
 
     def get_column_sample_values(

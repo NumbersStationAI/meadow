@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from meadow.database.connector.connector import Column, Table
 from meadow.database.connector.duckdb import DuckDBConnector
@@ -225,6 +226,46 @@ def test_run_sql_to_df(duckdb_connector: DuckDBConnector) -> None:
     pd.testing.assert_frame_equal(df, expected_df, check_dtype=False)
 
 
+def test_create_temp_table(duckdb_connector: DuckDBConnector) -> None:
+    db = Database(duckdb_connector)
+    sql = "SELECT * FROM users"
+    with pytest.raises(ValueError) as e:
+        db.create_temp_table(sql)
+    assert str(e.value) == "Only CREATE TEMPORARY TABLE statements are allowed."
+
+    sql = "CREATE TABLE temp AS SELECT * FROM users"
+    with pytest.raises(ValueError) as e:
+        db.create_temp_table(sql)
+    assert str(e.value) == "Only CREATE TEMPORARY TABLE statements are allowed."
+
+    sql = "CREATE TEMPORARY TABLE temp AS SELECT * FROM users"
+    db.create_temp_table(sql)
+    assert db.run_sql_to_df("SELECT * FROM temp").shape == (2, 3)
+
+
+def test_insert_values_temp_table(duckdb_connector: DuckDBConnector) -> None:
+    db = Database(duckdb_connector)
+    sql = "CREATE TEMPORARY TABLE temp (id INTEGER, val TEXT)"
+    db.create_temp_table(sql)
+    assert db.run_sql_to_df("SELECT * FROM temp").empty
+    db.insert_values_temp_table(
+        "temp",
+        [
+            {"id": 1, "val": "alice"},
+            {"id": 2, "val": "bob"},
+            {"id": 3, "val": "charlie"},
+        ],
+    )
+    df = db.run_sql_to_df("SELECT * FROM temp")
+    expected_df = pd.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "val": ["alice", "bob", "charlie"],
+        }
+    )
+    pd.testing.assert_frame_equal(df, expected_df, check_dtype=False)
+
+
 def test_finalize_draft_views(duckdb_connector: DuckDBConnector) -> None:
     db = Database(duckdb_connector)
     sql = "SELECT id+2 AS id2, username FROM users WHERE age < 0"
@@ -232,6 +273,30 @@ def test_finalize_draft_views(duckdb_connector: DuckDBConnector) -> None:
     assert db._view_tables["user_view"].is_draft
     db.finalize_draft_views()
     assert not db._view_tables["user_view"].is_draft
+
+
+def test_deprecate_table(duckdb_connector: DuckDBConnector) -> None:
+    db = Database(duckdb_connector)
+    assert not db._base_tables["users"].is_deprecated
+    assert not db._base_tables["emails"].is_deprecated
+    db.deprecate_table("users")
+    assert db._base_tables["users"].is_deprecated
+    assert not db._base_tables["emails"].is_deprecated
+
+
+def test_hide_and_unhide_tables(duckdb_connector: DuckDBConnector) -> None:
+    db = Database(duckdb_connector)
+    assert not db._base_tables["users"].is_hidden
+    assert not db._base_tables["emails"].is_hidden
+    db.hide_table("users")
+    assert db._base_tables["users"].is_hidden
+    assert not db._base_tables["emails"].is_hidden
+    db.unhide_all_tables()
+    assert not db._base_tables["users"].is_hidden
+    assert not db._base_tables["emails"].is_hidden
+    db.hide_all_but("users")
+    assert not db._base_tables["users"].is_hidden
+    assert db._base_tables["emails"].is_hidden
 
 
 def test_add_base_table_column_remap(duckdb_connector: DuckDBConnector) -> None:

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 import pandas as pd
 from pydantic import BaseModel, model_validator
@@ -123,7 +124,7 @@ class Connector(ABC):
         pass  # pragma: no cover
 
     @abstractmethod
-    def execute_sql(self, sql: str) -> None:
+    def execute_sql(self, sql: str, parameters: Any = None) -> None:
         """Run the SQL without returning anything."""
         pass  # pragma: no cover
 
