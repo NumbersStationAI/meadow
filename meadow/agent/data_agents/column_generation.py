@@ -80,7 +80,7 @@ def update_base_table_with_values(
     table_sql = (
         f"CREATE TEMPORARY TABLE {temp_table_name} (rn INT, {column_name} VARCHAR)"
     )
-    database.create_temp_table(table_name, table_sql)
+    database.create_temp_table(table_sql)
 
     # Add the new values. ROW_NUMBER() starts at 1 so add 1 to make values match
     values_to_add = [

@@ -1,6 +1,6 @@
 import logging
 from functools import partial
-from typing import Callable
+from typing import Any, Callable
 
 import pandas as pd
 import sqlglot
@@ -271,19 +271,19 @@ class Database:
             if table.is_draft:
                 table.is_draft = False
 
-    def unhide_all_tables(self) -> None:
-        """Unhide all tables."""
-        for _, table in self._base_tables.items():
-            table.is_hidden = False
-        for _, table in self._view_tables.items():
-            table.is_hidden = False
-
     def deprecate_table(self, name: str) -> None:
         """Deprecate a table."""
         if name in self._base_tables:
             self._base_tables[name].is_deprecated = True
         if name in self._view_tables:
             self._view_tables[name].is_deprecated = True
+
+    def unhide_all_tables(self) -> None:
+        """Unhide all tables."""
+        for _, table in self._base_tables.items():
+            table.is_hidden = False
+        for _, table in self._view_tables.items():
+            table.is_hidden = False
 
     def hide_table(self, name: str) -> None:
         """Hide a table."""
@@ -309,7 +309,7 @@ class Database:
         result = self._connector.run_sql_to_df(sql)
         return result
 
-    def create_temp_table(self, table_name: str, sql: str) -> None:
+    def create_temp_table(self, sql: str) -> None:
         """Create a temporary table.
 
         Temperary tables are NOT shown in the schema. They are intermediate
@@ -322,6 +322,7 @@ class Database:
             raise ValueError("Only CREATE TEMPORARY TABLE statements are allowed.")
         if (
             "properties" not in parsed.args
+            or not parsed.args["properties"]
             or not parsed.args["properties"].expressions
             or not parsed.args["properties"].expressions[0]
             == sqlglot.exp.TemporaryProperty()
@@ -330,7 +331,7 @@ class Database:
         self._connector.execute_sql(sql)
 
     def insert_values_temp_table(
-        self, table_name: str, values: list[dict[str, str]]
+        self, table_name: str, values: list[dict[str, Any]]
     ) -> None:
         """Insert values into a temporary table."""
         if not values:
@@ -339,8 +340,9 @@ class Database:
         if not is_temporary_table(self._connector, table_name):
             raise ValueError(f"Table {table_name} is not a temporary table.")
         for row in values:
-            sql = f"INSERT INTO {table_name} ({', '.join(row.keys())}) VALUES ({', '.join(map(self._connector.quote, row.values()))})"
-            self._connector.execute_sql(sql)
+            values_param = tuple(row.values())
+            sql = f"INSERT INTO {table_name} ({', '.join(row.keys())}) VALUES ({', '.join(['?'] * len(row))})"
+            self._connector.execute_sql(sql, parameters=values_param)
 
     def add_view(
         self,

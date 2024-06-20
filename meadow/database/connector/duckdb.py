@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pandas as pd
@@ -46,9 +47,11 @@ class DuckDBConnector(Connector):
             raise ValueError("Must connect to database before running SQL.")
         return self.cur.sql(sql).df()
 
-    def execute_sql(self, sql: str) -> None:
+    def execute_sql(self, sql: str, parameters: Any = None) -> None:
         """Run the SQL without returning anything."""
-        self.conn.execute(sql)
+        if not self.cur:
+            raise ValueError("Must connect to database before running SQL.")
+        self.cur.execute(sql, parameters=parameters)
         self.commit()
 
     def get_tables(self) -> list[Table]:
