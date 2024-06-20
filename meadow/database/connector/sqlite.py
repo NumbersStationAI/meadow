@@ -46,6 +46,11 @@ class SQLiteConnector(Connector):
         """Run an SQL query."""
         return pd.read_sql_query(sql, self.conn)
 
+    def execute_sql(self, sql: str) -> None:
+        """Run the SQL without returning anything."""
+        self.conn.execute(sql)
+        self.commit()
+
     def get_column_sample_values(
         self, table_name: str, column_name: str, limit: int = 3
     ) -> list:

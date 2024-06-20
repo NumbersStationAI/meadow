@@ -45,7 +45,14 @@ class Table(BaseModel):
 
     Deprecated tables are not shown in the schema or used.
 
-    Deprecated tables are mainly base tables that were remapping or renamed.
+    Deprecated tables are mainly base tables that were remapping or renamed or replaced by view with added columns.
+    """
+
+    is_hidden: bool = False
+    """If the table is hidden or not.
+
+    Hidden tables are those not selected for a sequence of steps in a single plan.
+    As soon as the plan is done, the table will be shown again.
     """
 
     columns: list[Column] | None = None
@@ -113,6 +120,11 @@ class Connector(ABC):
     @abstractmethod
     def run_sql_to_df(self, sql: str) -> pd.DataFrame:
         """Run an SQL query."""
+        pass  # pragma: no cover
+
+    @abstractmethod
+    def execute_sql(self, sql: str) -> None:
+        """Run the SQL without returning anything."""
         pass  # pragma: no cover
 
     @abstractmethod

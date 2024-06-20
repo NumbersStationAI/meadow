@@ -90,7 +90,6 @@ def parse_plan(
     return AgentMessage(
         content=json.dumps([m.model_dump() for m in plan]),
         display_content=message,
-        tool_calls=None,
         sending_agent=agent_name,
         requires_response=False,
     )
@@ -248,7 +247,6 @@ class SQLDecomposerAgent(LLMPlannerAgent):
             if Commands.has_end(content):
                 return AgentMessage(
                     content=content,
-                    tool_calls=None,
                     sending_agent=self.name,
                     is_termination_message=True,
                 )

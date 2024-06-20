@@ -23,26 +23,6 @@ from meadow.database.database import Database
 
 logger = logging.getLogger(__name__)
 
-CUSTOM_RENAME_PROMPT = """Your goal is to clean up a schema to make detecting joins and understanding the data easier for asking queries. You can rename the tables and columns as you see fit.
-
-The user will give you a schema and you need to output a column name remapping for any column that needs a more descriptive or useful name. Join columns should be the same name and columns that do not join should be named differently. You can also keep the schema the same if you want.
-
-Output the remapping in JSON in the following format:
-
-{
-  "table_name": {
-    "old_column1_name": "old_or_new_column1_name",
-    "old_column2_name": "old_or_new_column2_name",
-    ...
-  },
-  "table_name": {
-    "old_column1_name": "old_or_new_column1_name",
-    ...
-  },
-}
-
-Make sure all new column names are unique. Try to keep changes to a minimum and keep columns as short as possible."""
-
 class PromptLog(BaseModel):
     """Prompt log."""
 
@@ -102,7 +82,7 @@ def get_text2sql_agent(
     add_sql_planner: bool,
     add_attribute_selector: bool,
     add_schema_cleaner: bool,
-) -> Agent:
+) -> ControllerAgent:
     """Get a text2sql agent with optional components."""
     callback_sql: Callable = lambda model_messages, chat_response: model_callback(
         model_messages, chat_response, example_idx, "SQLGeneratorAgent", all_prompts_to_save

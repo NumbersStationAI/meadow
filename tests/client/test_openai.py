@@ -42,7 +42,6 @@ def chat_completion() -> ChatCompletion:
                     content="This is a test.",
                     role="assistant",
                     function_call=None,
-                    tool_calls=None,
                 ),
             )
         ],
@@ -143,7 +142,6 @@ def test_convert_openai_to_response(
                 message=ChatMessage(
                     content="This is a test.",
                     role="assistant",
-                    tool_calls=None,
                 ),
             )
         ],
@@ -200,7 +198,6 @@ async def test_arun_chat(
                 message=ChatMessage(
                     content="This is a test.",
                     role="assistant",
-                    tool_calls=None,
                 ),
             )
         ],
