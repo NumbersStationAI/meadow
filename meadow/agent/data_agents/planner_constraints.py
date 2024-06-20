@@ -20,6 +20,13 @@ def sql_agent_constraints(parsed_plan: list[SubTask], user_input: str) -> str:
     if len(parsed_plan) == 1 and parsed_plan[0].agent.name == "SQLGenerator":
         if parsed_plan[0].prompt != user_input:
             error_message = f"SQLGenerator agent must have the exact user input as its instruction. Please make the instruction to SQLGenerator be <instruction>{user_input}</instruction>."
+    for p in parsed_plan:
+        if (
+            p.agent.name == "SQLGenerator"
+            and "SELECT" in p.prompt
+            and "FROM" in p.prompt
+        ):
+            error_message = "Please avoid giving SQL to the SQLGenerator. It requires an input instructon for what question to answer."
     return error_message
 
 
@@ -49,4 +56,17 @@ def metadata_question_constraints(parsed_plan: list[SubTask], user_input: str) -
     for pl in parsed_plan:
         if pl.agent.name == "MetadataQuestion" and len(parsed_plan) > 1:
             error_message = "MetadataQuestion agent can only be used as a solo agent. Please do not add any other agents."
+    return error_message
+
+
+def column_generator_constraints(parsed_plan: list[SubTask], user_input: str) -> str:
+    """Constraints for MetadataQuestion agent."""
+    error_message = None
+    for i, pl in enumerate(parsed_plan):
+        if pl.agent.name == "ColumnGenerator" and not any(
+            pl2.agent.name == "SingleTableSelectorAgent" for pl2 in parsed_plan[:i]
+        ):
+            error_message = (
+                "ColumnGenerator agent must be preceded by SingleTableSelectorAgent."
+            )
     return error_message

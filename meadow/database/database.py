@@ -1,6 +1,6 @@
 import logging
 from functools import partial
-from typing import Callable
+from typing import Any, Callable
 
 import pandas as pd
 import sqlglot
@@ -187,6 +187,18 @@ def check_if_non_select_query(sql: str) -> bool:
     return False
 
 
+def is_temporary_table(connector: Connector, table_name: str) -> bool:
+    """
+    Check if a table is a temporary table in an SQLite database."""
+    # Check if the table exists in the temporary table list
+    temp_tables = connector.run_sql_to_df(
+        f"SELECT name FROM sqlite_temp_master WHERE type='table' AND name='{table_name}'"
+    )
+    if temp_tables is not None and not temp_tables.empty:
+        return True
+    return False
+
+
 class Database:
     """Representation of database."""
 
@@ -198,10 +210,13 @@ class Database:
         self._base_tables: dict[str, Table] = {
             tbl.name: tbl for tbl in self._connector.get_tables()
         }
-        self._connector.close()
         self._base_table_remapping: dict[str, Table] = {}
 
         self._view_tables: dict[str, Table] = {}
+
+    def close(self) -> None:
+        """Close the connection to the database."""
+        self._connector.close()
 
     @property
     def tables(self) -> list[Table]:
@@ -209,12 +224,25 @@ class Database:
         base_tables = []
         for k in self._base_tables:
             if k in self._base_table_remapping:
-                if not self._base_table_remapping[k].is_deprecated:
+                if (
+                    not self._base_table_remapping[k].is_deprecated
+                    and not self._base_table_remapping[k].is_hidden
+                ):
                     base_tables.append(self._base_table_remapping[k])
             else:
-                if not self._base_tables[k].is_deprecated:
+                if (
+                    not self._base_tables[k].is_deprecated
+                    and not self._base_tables[k].is_hidden
+                ):
                     base_tables.append(self._base_tables[k])
-        return base_tables + list(self._view_tables.values())
+        view_tables = []
+        for k in self._view_tables:
+            if (
+                not self._view_tables[k].is_deprecated
+                and not self._view_tables[k].is_hidden
+            ):
+                view_tables.append(self._view_tables[k])
+        return base_tables + view_tables
 
     def get_table(self, name: str) -> Table | None:
         """Get the table by name."""
@@ -223,9 +251,17 @@ class Database:
             and not self._base_table_remapping[name].is_deprecated
         ):
             return self._base_table_remapping[name]
-        if name in self._base_tables and not self._base_tables[name].is_deprecated:
+        if (
+            name in self._base_tables
+            and not self._base_tables[name].is_deprecated
+            and not self._base_tables[name].is_hidden
+        ):
             return self._base_tables[name]
-        if name in self._view_tables:
+        if (
+            name in self._view_tables
+            and not self._view_tables[name].is_deprecated
+            and not self._view_tables[name].is_hidden
+        ):
             return self._view_tables[name]
         return None
 
@@ -235,18 +271,85 @@ class Database:
             if table.is_draft:
                 table.is_draft = False
 
+    def deprecate_table(self, name: str) -> None:
+        """Deprecate a table."""
+        if name in self._base_tables:
+            self._base_tables[name].is_deprecated = True
+        if name in self._view_tables:
+            self._view_tables[name].is_deprecated = True
+
+    def unhide_all_tables(self) -> None:
+        """Unhide all tables."""
+        for _, table in self._base_tables.items():
+            table.is_hidden = False
+        for _, table in self._view_tables.items():
+            table.is_hidden = False
+
+    def hide_table(self, name: str) -> None:
+        """Hide a table."""
+        if name in self._base_tables:
+            self._base_tables[name].is_hidden = True
+        if name in self._view_tables:
+            self._view_tables[name].is_hidden = True
+
+    def hide_all_but(self, name: str) -> None:
+        """Hide all tables except the one specified."""
+        for k in self._base_tables:
+            if k != name:
+                self._base_tables[k].is_hidden = True
+        for k in self._view_tables:
+            if k != name:
+                self._view_tables[k].is_hidden = True
+
     def run_sql_to_df(self, sql: str) -> pd.DataFrame:
         """Run an SQL query."""
         sql = self.normalize_query(sql)
         if check_if_non_select_query(sql):
             raise ValueError("Only SELECT queries are allowed.")
-        self._connector.connect()
         result = self._connector.run_sql_to_df(sql)
-        self._connector.close()
         return result
 
+    def create_temp_table(self, sql: str) -> None:
+        """Create a temporary table.
+
+        Temperary tables are NOT shown in the schema. They are intermediate
+        tables used to create new columns.
+        """
+        sql = self.normalize_query(sql)
+        # Verify it is a create temporary table statement
+        parsed = sqlglot.parse_one(sql, dialect=self._connector.dialect)
+        if not parsed.find(sqlglot.exp.Create):
+            raise ValueError("Only CREATE TEMPORARY TABLE statements are allowed.")
+        if (
+            "properties" not in parsed.args
+            or not parsed.args["properties"]
+            or not parsed.args["properties"].expressions
+            or not parsed.args["properties"].expressions[0]
+            == sqlglot.exp.TemporaryProperty()
+        ):
+            raise ValueError("Only CREATE TEMPORARY TABLE statements are allowed.")
+        self._connector.execute_sql(sql)
+
+    def insert_values_temp_table(
+        self, table_name: str, values: list[dict[str, Any]]
+    ) -> None:
+        """Insert values into a temporary table."""
+        if not values:
+            return
+        # Verify that the table is a temporary table
+        if not is_temporary_table(self._connector, table_name):
+            raise ValueError(f"Table {table_name} is not a temporary table.")
+        for row in values:
+            values_param = tuple(row.values())
+            sql = f"INSERT INTO {table_name} ({', '.join(row.keys())}) VALUES ({', '.join(['?'] * len(row))})"
+            self._connector.execute_sql(sql, parameters=values_param)
+
     def add_view(
-        self, name: str, sql: str, description: str = None, override: bool = True
+        self,
+        name: str,
+        sql: str,
+        description: str = None,
+        override: bool = True,
     ) -> None:
         """Add a view to the database."""
         valid, error = validate_sql(sql, self._connector.dialect)
@@ -267,6 +370,8 @@ class Database:
             raise e
         if not override and name in self._view_tables:
             raise ValueError(f"View already exists with name {name}")
+        if name in self._base_tables:
+            raise ValueError(f"Base table already exists with name {name}")
         self._view_tables[name] = Table(
             name=name,
             description=description,
