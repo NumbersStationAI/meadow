@@ -365,7 +365,8 @@ class PlannerAgent(LLMPlannerAgent, LLMAgentWithExecutors):
             )
             content = chat_response.choices[0].message.content
             # Add back user input for use in the plan parsing constraints
-            content = f"<userinput>{messages[0].content}</userinput>\n{content}"
+            if "<userinput>" not in content:
+                content = f"<userinput>{messages[0].content}</userinput>\n{content}"
             if Commands.has_end(content):
                 return AgentMessage(
                     content=content,

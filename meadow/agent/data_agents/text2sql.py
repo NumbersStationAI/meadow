@@ -212,7 +212,6 @@ class SQLGeneratorAgent(LLMAgentWithExecutors):
             content = content.replace("<end>", "")
         return AgentMessage(
             content=content,
-            tool_calls=None,
             sending_agent=self.name,
             requires_execution=True,
         )

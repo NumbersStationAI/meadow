@@ -21,6 +21,8 @@ pandas = "^2.2.2"
 ipdb = "^0.13.13"
 click = "^8.1.7"
 rich = "^13.7.1"
+beautifulsoup4 = "^4.12.3"
+textblob = "^0.18.0.post0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.1"

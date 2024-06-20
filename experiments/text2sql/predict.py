@@ -140,6 +140,7 @@ def generate_sql(
     sql_responses = []
     for i in range(len(agents)):
         agent = agents[i]
+        database: Database = agent._planner._database
         # Hack to get text2sql and user agent chat
         evuse = None
         for ag in agent._messages.get_all_messages().keys():
@@ -166,12 +167,12 @@ def generate_sql(
                 .strip()
             )
             # noramlize sql with the views
-            database: Database = agent._planner._database
             sql = database.normalize_query(sql)
             if "Table:" in last_sql_message.display_content:
                 tbl = last_sql_message.display_content.split("Table:")[1].split("Warning:")[0].strip()
             else:
                 tbl = ""
+        database.close()
         # print("FINAL SQL", sql, "\n\n", tbl)
         sql_responses.append((sql, tbl))
 

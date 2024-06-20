@@ -46,6 +46,11 @@ class DuckDBConnector(Connector):
             raise ValueError("Must connect to database before running SQL.")
         return self.cur.sql(sql).df()
 
+    def execute_sql(self, sql: str) -> None:
+        """Run the SQL without returning anything."""
+        self.conn.execute(sql)
+        self.commit()
+
     def get_tables(self) -> list[Table]:
         """Get the tables in the database."""
         # read from information_schema.tables

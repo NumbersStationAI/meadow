@@ -23,7 +23,7 @@ class ControllerAgent(Agent):
         name: str = "Controller",
         description: str = "Controller agent that manages the flow between other agents.",
         supervisor_auto_respond: bool = False,  # supervisor auto <next>
-        can_solidify_drafts: bool = True,  # whether to finalize drafts - False with executor convos
+        can_solidify_intermediate_table_states: bool = True,  # whether to finalize drafts - False with executor convos
         silent: bool = True,
     ):
         self._supervisor = supervisor
@@ -39,7 +39,9 @@ class ControllerAgent(Agent):
             self._agent_executors[planner] = planner.executors
         self._name = name
         self._description = description
-        self._can_solidify_drafts = can_solidify_drafts
+        self._can_solidify_intermediate_table_states = (
+            can_solidify_intermediate_table_states
+        )
         # Current agent we are actively talking to (can be supervisor)
         self._current_agent: Agent = self._planner
         # Current agent solving the task (not the supervisor)
@@ -198,6 +200,9 @@ class ControllerAgent(Agent):
             next_message = messages[-1].content
             next_display = messages[-1].display_content
             is_termination_message = True
+            # Unhide any tables as it's the end of a "task"
+            if self._can_solidify_intermediate_table_states:
+                self.database.unhide_all_tables()
         return AgentMessage(
             content=next_message,
             display_content=next_display,
@@ -239,7 +244,7 @@ class ControllerAgent(Agent):
                         database=None,
                     ),
                     database=self.database,
-                    can_solidify_drafts=False,
+                    can_solidify_intermediate_table_states=False,
                     supervisor_auto_respond=True,
                     silent=self._silent,
                 )
@@ -255,7 +260,7 @@ class ControllerAgent(Agent):
                 sender.set_chat_role(AgentRole.TASK_HANDLER)
             # Finalize any temporary draft data views made and edited by the executors into final
             # views for the next step
-            if self._can_solidify_drafts:
+            if self._can_solidify_intermediate_table_states:
                 self.database.finalize_draft_views()
             # Add the last message from the sender with the final response. This is needed if we
             # meed to retrieve the final response from sender to use later on in the plan.
