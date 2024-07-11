@@ -23,6 +23,7 @@ click = "^8.1.7"
 rich = "^13.7.1"
 beautifulsoup4 = "^4.12.3"
 textblob = "^0.18.0.post0"
+together = "^1.2.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.1"
@@ -50,6 +51,7 @@ ignore_missing_imports = true
 module = [
   "jinja2.*",
   "attr.*",
+  "together.*",
 ]
 
 [tool.ruff]
