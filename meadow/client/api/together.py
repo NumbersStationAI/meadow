@@ -16,9 +16,6 @@ from meadow.client.schema import (
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_MAX_TOKENS = 100
-
-
 class TogetherClient(APIClient):
     """Together LLM Client."""
 
@@ -34,10 +31,7 @@ class TogetherClient(APIClient):
         )
 
     def convert_request_for_together(self, request: ChatRequest) -> dict[str, str]:
-        """Convert a ChatRequest to a dict for Together.
-
-        Together requires max_tokens to be set. If None is provided, will default.
-        """
+        """Convert a ChatRequest to a dict for Together."""
         request_dict = request.model_dump(exclude_none=True)
         keys_to_delete = {"seed"}
         for key in keys_to_delete:

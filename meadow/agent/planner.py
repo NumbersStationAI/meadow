@@ -133,6 +133,8 @@ def parse_plan(
         message += ">"
     if "<steps>" not in message:
         error_message = "Plan not found in the response. Please provide a plan in the format <steps>...</steps>."
+    if "</steps>" not in message:
+        message += "</steps>"
     if not error_message:
         inner_steps = re.search(r"(<steps>.*</steps>)", message, re.DOTALL).group(1)
         parsed_steps = parse_steps(inner_steps)
