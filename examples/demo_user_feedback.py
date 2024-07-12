@@ -25,6 +25,8 @@ from meadow.cache import DuckDBCache
 from meadow.client.api.anthropic import AnthropicClient
 from meadow.client.api.api_client import APIClient
 from meadow.client.api.openai import OpenAIClient
+from meadow.client.api.samba import SambaClient
+from meadow.client.api.together import TogetherClient
 from meadow.client.schema import LLMConfig
 from meadow.database.connector.connector import Connector
 from meadow.database.connector.duckdb import DuckDBConnector
@@ -230,6 +232,10 @@ def run_meadow(
         api_client: APIClient = AnthropicClient(api_key=api_key)
     elif api_provider == "openai":
         api_client = OpenAIClient(api_key=api_key)
+    elif api_provider == "together":
+        api_client = TogetherClient(api_key=api_key)
+    elif api_provider == "samba":
+        api_client = SambaClient(api_key=api_key)
     else:
         raise ValueError(f"Unknown API provider: {api_provider}")
     client = Client(
@@ -237,7 +243,7 @@ def run_meadow(
         api_client=api_client,
         model=model,
     )
-    big_client = Client(cache=cache, api_client=api_client, model="gpt-4o")
+    big_client = Client(cache=cache, api_client=api_client, model=model)
     llm_config = LLMConfig(
         max_tokens=1000,
         temperature=0.0,
@@ -288,7 +294,7 @@ if __name__ == "__main__":
     argparser.add_argument(
         "--model",
         type=str,
-        help="Anthropic model.",
+        help="Model.",
         default="gpt-4o",
     )
     argparser.add_argument(

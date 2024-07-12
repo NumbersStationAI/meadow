@@ -117,7 +117,7 @@ class LLMConfig(BaseModel):
     """Stop sequences."""
     stop: list[str] | None = None
 
-    """Penalize resence."""
+    """Penalize presence."""
     presence_penalty: float | None = None
 
     """Penalize frequency."""
