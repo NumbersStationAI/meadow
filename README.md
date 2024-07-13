@@ -32,12 +32,14 @@ If you want to load our sample data (required for the benchmark) in `examples/da
 
 ```bash
 cd meadow/examples/data
+mkdir -p database_sqlite/sales_example 
 sqlite3 database_sqlite/sales_example/sales_example.sqlite < sales.sql
 ```
 
 And to load the ambiguous data (also needed for benchmark), run
 ```bash
 cd meadow/examples/data
+mkdir -p database_sqlite/sales_ambiguous_joins_example 
 sqlite3 database_sqlite/sales_ambiguous_joins_example/sales_ambiguous_joins_example.sqlite < sales_ambiguous_joins.sql
 ```
 
