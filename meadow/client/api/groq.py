@@ -32,12 +32,8 @@ class GroqClient(APIClient):
 
     def convert_request_for_groq(self, request: ChatRequest) -> dict[str, str]:
         """Convert a ChatRequest to a dict for Groq."""
-        request_dict = request.model_dump(exclude_none=True)
-        keys_to_delete = {"seed"}
-        for key in keys_to_delete:
-            if key in request_dict:
-                del request_dict[key]
-        return request_dict
+       
+        return request.model_dump(exclude=("seed",), exclude_none=True)
 
     def convert_groq_to_response(
         self, groq_response: ChatCompletion
