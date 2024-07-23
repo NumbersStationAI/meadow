@@ -32,12 +32,14 @@ If you want to load our sample data (required for the benchmark) in `examples/da
 
 ```bash
 cd meadow/examples/data
+mkdir -p database_sqlite/sales_example 
 sqlite3 database_sqlite/sales_example/sales_example.sqlite < sales.sql
 ```
 
 And to load the ambiguous data (also needed for benchmark), run
 ```bash
 cd meadow/examples/data
+mkdir -p database_sqlite/sales_ambiguous_joins_example 
 sqlite3 database_sqlite/sales_ambiguous_joins_example/sales_ambiguous_joins_example.sqlite < sales_ambiguous_joins.sql
 ```
 
@@ -134,14 +136,14 @@ An agent can be extended in three possible ways:
 
 1. `PlannerAgent`: The agent must have a collection of agents it can coordinate between and must be able to move through a plan linearly. Planner agents can be hierarchical in that one planner agent can have another planner agent as one of its available agents to coordinate between.
 2. `ExecutorAgent`: The agent must have an execution function that parses a message from another agent. The role of the executor is to catch bugs and throw back error messages upon mistakes.
-3. `AgentWithExecutors`: This is an agent that has an associated executor agent that must executor on this agent's output. When an agent has an executor, a sub-chat is initiated between the agent and its executor so the executor and agent can debug if desired.
+3. `AgentWithExecutors`: This is an agent that has an associated executor agent that must execute on this agent's output. When an agent has an executor, a sub-chat is initiated between the agent and its executor so the executor and agent can debug if desired.
 
 Agents can be extended in multiple ways, e.g., an agent can be both an executor agent and have its own executors.
 
 ### Controller
 There is one special non-LLM agent in Meadow called the [`Controller`](meadow/agent/controller.py). The controller is determinisitc and has three main functions:
 
-1. It is the mediator between any conversation between two agents. It sends and receives messages and stores the message noversation history for ease of access and observability.
+1. It is the mediator between any conversation between two agents. It sends and receives messages and stores the message coversation history for ease of access and observability.
 2. It implements and understands the [`Commands`](meadow/agent/schema.py) sent by the supervisor to move through a plan.
 3. It can start new chats between two agents. E.g. it initiates the chat between an agent and its executor as a "branch" off of the main chat. Once the sub-chat terminates, the main chat can continue.
 
